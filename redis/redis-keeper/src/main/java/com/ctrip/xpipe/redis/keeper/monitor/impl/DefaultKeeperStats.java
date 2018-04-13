@@ -1,8 +1,8 @@
 package com.ctrip.xpipe.redis.keeper.monitor.impl;
 
-import java.util.concurrent.atomic.AtomicLong;
-
 import com.ctrip.xpipe.redis.keeper.monitor.KeeperStats;
+
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author wenchao.meng
@@ -16,6 +16,10 @@ public class DefaultKeeperStats implements KeeperStats{
 	private AtomicLong partialSyncCount = new AtomicLong();
 
 	private AtomicLong partialSyncErrorCount = new AtomicLong();
+
+	private AtomicLong waitOffsetSucceed = new AtomicLong();
+
+	private AtomicLong waitOffsetFail = new AtomicLong();
 
 	@Override
 	public void increaseFullSync() {
@@ -45,5 +49,25 @@ public class DefaultKeeperStats implements KeeperStats{
 	@Override
 	public long getPartialSyncErrorCount() {
 		return partialSyncErrorCount.get();
+	}
+
+	@Override
+	public long increaseWaitOffsetSucceed() {
+		return waitOffsetSucceed.incrementAndGet();
+	}
+
+	@Override
+	public long increasWaitOffsetFail() {
+		return waitOffsetFail.incrementAndGet();
+	}
+
+	@Override
+	public long getWaitOffsetSucceed() {
+		return waitOffsetSucceed.get();
+	}
+
+	@Override
+	public long getWaitOffsetFail() {
+		return waitOffsetFail.get();
 	}
 }

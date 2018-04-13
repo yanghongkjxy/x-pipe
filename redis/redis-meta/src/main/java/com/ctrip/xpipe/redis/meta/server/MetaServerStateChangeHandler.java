@@ -1,8 +1,7 @@
 package com.ctrip.xpipe.redis.meta.server;
 
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
+import com.ctrip.xpipe.tuple.Pair;
 
 /**
  * @author wenchao.meng
@@ -19,7 +18,7 @@ public interface MetaServerStateChangeHandler {
 	 * @param activeKeeper if activeKeeper == null, means that no keeper is active 
 	 * @throws Exception
 	 */
-	void keeperActiveElected(String clusterId, String shardId, KeeperMeta activeKeeper) throws Exception;
+	void keeperActiveElected(String clusterId, String shardId, KeeperMeta activeKeeper);
 
 	void keeperMasterChanged(String clusterId, String shardId, Pair<String, Integer> newMaster);
 }

@@ -1,21 +1,21 @@
 package com.ctrip.xpipe.redis.console.service;
 
-import java.util.List;
-
-import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
-import org.junit.Assert;
-import org.junit.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.annotation.DirtiesContext;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
 import com.ctrip.xpipe.redis.console.migration.status.ClusterStatus;
 import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
-import com.ctrip.xpipe.redis.console.model.MigrationEventModel;
 import com.ctrip.xpipe.redis.console.model.MigrationEventTbl;
 import com.ctrip.xpipe.redis.console.model.MigrationShardTbl;
 import com.ctrip.xpipe.redis.console.service.migration.MigrationService;
+import com.ctrip.xpipe.redis.console.service.migration.impl.MigrationRequest;
+import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
+import org.junit.Assert;
+import org.junit.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.annotation.DirtiesContext;
+
+import java.util.List;
 
 public class MigrationServiceTest extends AbstractConsoleIntegrationTest {
 	
@@ -34,15 +34,16 @@ public class MigrationServiceTest extends AbstractConsoleIntegrationTest {
 		return "";
 	}
 	
-	private MigrationEventModel createEventDemo(long clusterId, long destDcId) {
-		MigrationEventModel model = new MigrationEventModel();
-		MigrationEventTbl event = new MigrationEventTbl();
-		MigrationClusterTbl migrationClsuter = new MigrationClusterTbl();
-		migrationClsuter.setClusterId(clusterId).setDestinationDcId(destDcId);
-		
-		event.getMigrationClusters().add(migrationClsuter);
-		model.setEvent(event);
-		return model;
+	private MigrationRequest createEventDemo(long clusterId, long destDcId) {
+
+		MigrationRequest migrationRequest = new MigrationRequest("unit test");
+		migrationRequest.setTag("unit test-" + getTestName());
+
+		MigrationRequest.ClusterInfo clusterInfo = new MigrationRequest.ClusterInfo();
+		clusterInfo.setClusterId(clusterId);
+		clusterInfo.setToDcId(destDcId);
+		migrationRequest.addClusterInfo(clusterInfo);
+		return migrationRequest;
 	}
 	
 	@Test
@@ -55,7 +56,7 @@ public class MigrationServiceTest extends AbstractConsoleIntegrationTest {
 		List<MigrationShardTbl> result_shards = migrationService.findMigrationShards(result_cluster.getId());
 		
 		Assert.assertEquals(eventId, result.getId());
-		Assert.assertEquals("xpipe", result.getOperator());
+		Assert.assertEquals("unit test", result.getOperator());
 		Assert.assertNotNull(result_cluster);
 		Assert.assertEquals(1, result_cluster.getClusterId());
 		Assert.assertEquals(2, result_cluster.getDestinationDcId());

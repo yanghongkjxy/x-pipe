@@ -1,5 +1,17 @@
 package com.ctrip.xpipe.redis.keeper.store;
 
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
+import com.ctrip.xpipe.netty.filechannel.ReferenceFileRegion;
+import com.ctrip.xpipe.redis.core.store.CommandsListener;
+import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
+import com.google.common.util.concurrent.SettableFuture;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelFuture;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
@@ -10,20 +22,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
-
-import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
-import com.ctrip.xpipe.netty.filechannel.ReferenceFileRegion;
-import com.ctrip.xpipe.redis.core.store.CommandsListener;
-import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
-import com.google.common.util.concurrent.SettableFuture;
-
-import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelFuture;
 
 /**
  * @author wenchao.meng
@@ -44,6 +42,31 @@ public class DefaultCommandStoreTest extends AbstractRedisKeeperTest {
 		String testDir = getTestFileDir();
 		File commandTemplate = new File(testDir, getTestName());
 		commandStore = new DefaultCommandStore(commandTemplate, maxFileSize, createkeeperMonitor());
+	}
+
+	@Test
+	public void testDynamicConfig() throws IOException {
+
+		final int initDataKeep = 20;
+		final AtomicInteger dataKeep = new AtomicInteger(initDataKeep);
+		int gcAfterCreateMilli = 60000;
+		File commandTemplate = new File(getTestFileDir(), getTestName());
+
+		commandStore = new DefaultCommandStore(commandTemplate, maxFileSize, gcAfterCreateMilli, () -> dataKeep.get(), createkeeperMonitor()){
+			@Override
+			public long totalLength() {
+				return initDataKeep * maxFileSize;
+			}
+		};
+
+		Assert.assertFalse(commandStore.canDeleteCmdFile(maxFileSize * 10, 0, maxFileSize, 0));
+
+		dataKeep.set(19);
+		Assert.assertFalse(commandStore.canDeleteCmdFile(maxFileSize * 10, 0, maxFileSize, 0));
+
+		dataKeep.set(18);
+		Assert.assertTrue(commandStore.canDeleteCmdFile(maxFileSize * 10, 0, maxFileSize, 0));
+
 	}
 
 	@Test
@@ -89,11 +112,11 @@ public class DefaultCommandStoreTest extends AbstractRedisKeeperTest {
 				
 				try{
 					for(int i=0;i<runTimes;i++){
-						write.acquire();;
+						write.acquire();
 						int randomLength = randomInt(0, 1 << 8);
 						commandStore.appendCommands(Unpooled.wrappedBuffer(randomString(randomLength).getBytes()));
 						realLength.addAndGet(randomLength);
-						read.release();;
+						read.release();
 					}
 				}finally{
 					finished.set(true);
@@ -117,7 +140,7 @@ public class DefaultCommandStoreTest extends AbstractRedisKeeperTest {
 						if(len != realLength.get()){
 							result.set(false);
 						}
-						write.release();;
+						write.release();
 					}
 				}finally{
 					latch.countDown();

@@ -1,4 +1,5 @@
 testbin
+bin
 TODO
 *.swp
 *.versionsBackup
@@ -20,6 +21,7 @@ reports
 .DS_Store
 datasources.xml
 !redis/redis-console/src/test/resources/datasources.xml
+config-cache/*
 
 # Idea files
 .idea

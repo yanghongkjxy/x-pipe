@@ -1,7 +1,9 @@
 package com.ctrip.xpipe.redis.keeper.monitor;
 
-import java.util.concurrent.atomic.AtomicInteger;
-
+import com.ctrip.xpipe.redis.core.store.CommandStore;
+import com.ctrip.xpipe.redis.core.store.CommandsListener;
+import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
+import com.ctrip.xpipe.redis.keeper.monitor.impl.DefaultCommandStoreDelay;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -9,12 +11,9 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 
-import static org.mockito.Mockito.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import com.ctrip.xpipe.redis.core.store.CommandStore;
-import com.ctrip.xpipe.redis.core.store.CommandsListener;
-import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
-import com.ctrip.xpipe.redis.keeper.monitor.impl.DefaultCommandStoreDelay;
+import static org.mockito.Mockito.mock;
 
 /**
  * @author wenchao.meng
@@ -142,7 +141,7 @@ public class DefaultCommandDelayTest extends AbstractRedisKeeperTest {
 	public class TestCommandDelay extends DefaultCommandStoreDelay {
 
 		public TestCommandDelay(CommandStore commandStore, int delayLogLimitMicro) {
-			super(commandStore, delayLogLimitMicro);
+			super(commandStore, () -> delayLogLimitMicro);
 		}
 
 		@Override

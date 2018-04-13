@@ -15,15 +15,25 @@ public class MigrationForceEndState extends AbstractMigrationState {
 		this.setNextAfterSuccess(this)
 			.setNextAfterFail(this);
 	}
-	
+
 	@Override
-	public void action() {
-		getHolder().update(getHolder(), getHolder());
+	protected void doRollback() {
+		throw new UnsupportedOperationException("already force end, can not tryRollback:" + getStatus());
+
+	}
+
+	@Override
+	public void doAction() {
+		try {
+			getHolder().update(getHolder(), getHolder());
+		}finally {
+			markDone();
+		}
 	}
 
 	@Override
 	public void refresh() {
 		// Nothing to do
-		logger.debug("[MigrationForceEnd]{}", getHolder().getCurrentCluster().getClusterName());
+		logger.debug("[MigrationForceEnd]{}", getHolder().clusterName());
 	}
 }

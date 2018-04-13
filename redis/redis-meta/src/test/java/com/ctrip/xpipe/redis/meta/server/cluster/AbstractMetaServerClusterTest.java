@@ -1,15 +1,15 @@
 package com.ctrip.xpipe.redis.meta.server.cluster;
 
-import java.util.LinkedList;
-import java.util.List;
-
-import org.apache.curator.framework.CuratorFramework;
-import org.junit.Before;
-
+import com.ctrip.xpipe.lifecycle.LifecycleHelper;
 import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
 import com.ctrip.xpipe.redis.meta.server.TestMetaServer;
 import com.ctrip.xpipe.zk.ZkClient;
 import com.ctrip.xpipe.zk.impl.DefaultZkClient;
+import org.apache.curator.framework.CuratorFramework;
+import org.junit.Before;
+
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * @author wenchao.meng
@@ -39,8 +39,8 @@ public class AbstractMetaServerClusterTest extends AbstractMetaServerTest{
 		
 		ZkClient client = new DefaultZkClient();
 		client.setZkAddress(String.format("localhost:%d", zkPort));
-		client.initialize();
-		client.start();
+		LifecycleHelper.initializeIfPossible(client);
+		LifecycleHelper.startIfPossible(client);
 		return client.get();
 	}
 

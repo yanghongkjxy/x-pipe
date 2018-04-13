@@ -1,8 +1,7 @@
 package com.ctrip.xpipe.redis.console.migration;
 
-import org.springframework.beans.factory.annotation.Autowired;
-
 import com.ctrip.xpipe.command.AbstractCommand;
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
 import com.ctrip.xpipe.redis.console.migration.command.MigrationCommandBuilder;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
@@ -15,6 +14,8 @@ import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PRIMARY_DC
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PRIMARY_DC_CHECK_RESULT;
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PrimaryDcChangeMessage;
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PrimaryDcCheckMessage;
+import org.springframework.beans.factory.annotation.Autowired;
+
 import static org.mockito.Mockito.*;
 
 /**
@@ -47,6 +48,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 
 					@Override
 					protected void doExecute() throws Exception {
+						logger.info("[doExecute][set result]{}, {}, {}", cluster, shard, future());
 						future().setSuccess(
 								new PrimaryDcCheckMessage(PRIMARY_DC_CHECK_RESULT.SUCCESS, "Check success"));
 					}
@@ -103,7 +105,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 	protected void mockSuccessPrevPrimaryDcCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster,
 			String shard, String prevPrimaryDc) {
 		when(migrationCommandBuilder.buildPrevPrimaryDcCommand(cluster, shard, prevPrimaryDc))
-				.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
+				.thenReturn(new AbstractCommand<MetaServerConsoleService.PreviousPrimaryDcMessage>() {
 					@Override
 					public String getName() {
 						return String.format("Mocked-PrevSuccess-%s-%s-%s", cluster, shard, prevPrimaryDc);
@@ -112,7 +114,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 					@Override
 					protected void doExecute() throws Exception {
 						future().setSuccess(
-								new PrimaryDcChangeMessage(PRIMARY_DC_CHANGE_RESULT.SUCCESS, "Prev success"));
+								new MetaServerConsoleService.PreviousPrimaryDcMessage(new HostPort("127.0.0.1", 6379), null, "Prev success"));
 					}
 
 					@Override
@@ -124,7 +126,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 	protected void mockFailPrevPrimaryDcCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster,
 			String shard, String prevPrimaryDc, Throwable ex) {
 		when(migrationCommandBuilder.buildPrevPrimaryDcCommand(cluster, shard, prevPrimaryDc))
-				.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
+				.thenReturn(new AbstractCommand<MetaServerConsoleService.PreviousPrimaryDcMessage>() {
 					@Override
 					public String getName() {
 						return String.format("Mocked-PrevFail-%s-%s-%s", cluster, shard, prevPrimaryDc);
@@ -143,7 +145,8 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 
 	protected void mockSuccessNewPrimaryDcCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster,
 			String shard, String newPrimaryDc) {
-		when(migrationCommandBuilder.buildNewPrimaryDcCommand(cluster, shard, newPrimaryDc))
+
+		when(migrationCommandBuilder.buildNewPrimaryDcCommand(eq(cluster), eq(shard), eq(newPrimaryDc), anyObject()))
 				.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
 
 					@Override
@@ -154,7 +157,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 					@Override
 					protected void doExecute() throws Exception {
 						future().setSuccess(
-								new PrimaryDcChangeMessage(PRIMARY_DC_CHANGE_RESULT.SUCCESS, "New success"));
+								new PrimaryDcChangeMessage("New success", "127.0.0.1", randomPort()));
 					}
 
 					@Override
@@ -165,7 +168,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 	
 	protected void mockFailNewPrimaryDcCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster,
 			String shard, String newPrimaryDc) {
-		when(migrationCommandBuilder.buildNewPrimaryDcCommand(cluster, shard, newPrimaryDc))
+		when(migrationCommandBuilder.buildNewPrimaryDcCommand(eq(cluster), eq(shard), eq(newPrimaryDc), anyObject()))
 				.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
 
 					@Override
@@ -187,7 +190,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 
 	protected void mockFailNewPrimaryDcCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster,
 			String shard, String newPrimaryDc, Throwable ex) {
-		when(migrationCommandBuilder.buildNewPrimaryDcCommand(cluster, shard, newPrimaryDc))
+		when(migrationCommandBuilder.buildNewPrimaryDcCommand(eq(cluster), eq(shard), eq(newPrimaryDc), anyObject()))
 				.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
 
 					@Override
@@ -274,7 +277,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 	protected void mockSuccessRollBackCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster, String shard,
 			String prevPrimaryDc) {
 		when(migrationCommandBuilder.buildRollBackCommand(cluster, shard, prevPrimaryDc))
-			.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>(){
+			.thenReturn(new AbstractCommand<MetaServerConsoleService.PreviousPrimaryDcMessage>(){
 
 				@Override
 				public String getName() {
@@ -296,7 +299,7 @@ public class AbstractMigrationTest extends AbstractConsoleIntegrationTest {
 	protected void mockFailRollBackCommand(MigrationCommandBuilder migrationCommandBuilder, String cluster, String shard,
 			String prevPrimaryDc) {
 		when(migrationCommandBuilder.buildRollBackCommand(cluster, shard, prevPrimaryDc))
-			.thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>(){
+			.thenReturn(new AbstractCommand<MetaServerConsoleService.PreviousPrimaryDcMessage>(){
 
 				@Override
 				public String getName() {

@@ -1,14 +1,13 @@
 package com.ctrip.xpipe.redis.integratedtest.simple;
 
-import java.io.IOException;
-import java.util.List;
-
-import org.junit.Before;
-import org.junit.Test;
-
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.integratedtest.AbstractIntegratedTest;
 import com.ctrip.xpipe.redis.integratedtest.stability.DelayManager;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.io.IOException;
+import java.util.List;
 
 /**
  * @author wenchao.meng
@@ -23,7 +22,7 @@ public class MultiThreadDelayTest extends AbstractIntegratedTest {
 	
 	@Before
 	public void beforeMultiThreadDelayTesr(){
-		 delayManager = new DelayManager(scheduled, "delay", 10);
+		 delayManager = new DelayManager(scheduled, "delay", getTestName(), 10);
 	}
 
 	@Test

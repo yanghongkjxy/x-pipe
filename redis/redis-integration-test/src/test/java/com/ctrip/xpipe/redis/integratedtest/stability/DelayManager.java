@@ -1,15 +1,14 @@
 package com.ctrip.xpipe.redis.integratedtest.stability;
 
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 
 /**
  * @author wenchao.meng
@@ -20,7 +19,9 @@ public class DelayManager{
 	
 	private static Logger logger = LoggerFactory.getLogger(DelayManager.class);
 
-	private String desc;
+	private String metric;
+	private String metricSub;
+
 	private int delayPrintInterval = Integer.parseInt(System.getProperty("delay-print-interval", "5000"));
 	
 	private ScheduledExecutorService scheduled;
@@ -35,24 +36,32 @@ public class DelayManager{
     private final SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     
     private boolean info = true;
-	
+
 	private AtomicLong totalCount = new AtomicLong();
 	private AtomicLong totalDelay = new AtomicLong();
 
-	public DelayManager(ScheduledExecutorService scheduled, String desc, int tooLongBaseMilli, boolean info){
-		this.desc = desc;
+	private MetricLog delayMetric = MetricLog.create();
+
+	public DelayManager(ScheduledExecutorService scheduled, String metric, String metricSub, int tooLongBaseMilli, boolean info){
+		this.metric = metric;
+		this.metricSub = metricSub;
 		this.scheduled = scheduled;
 		this.tooLongBaseMilli = tooLongBaseMilli;
 		this.info = info;
 		this.scheduled.scheduleAtFixedRate(new DelayPrinter(), delayPrintInterval, delayPrintInterval, TimeUnit.MILLISECONDS);
 	}
 
-	public DelayManager(ScheduledExecutorService scheduled, String desc, int tooLongBaseMilli){
-		this(scheduled, desc, tooLongBaseMilli, true);
+	public DelayManager(ScheduledExecutorService scheduled, String metric, String metricSub, int tooLongBaseMilli){
+		this(scheduled, metric, metricSub, tooLongBaseMilli, true);
 	}
 	
 	public void delay(long delayNanos){
-		
+
+		if (delayNanos < 0) {
+			logger.error("[onPMessage][delay < 0]{}", delayNanos);
+			return;
+		}
+
 		totalCount.incrementAndGet();
 		totalDelay.addAndGet(delayNanos);
 		
@@ -88,15 +97,16 @@ public class DelayManager{
 
 			long average = countDelta == 0 ? 0 : (currentTotalDelay - previousTotalDelay)/countDelta;
 			long countLong = currentTooLongCount - previousTooLongCount;
-			
+
+			String infoMetric = metric + "." + metricSub;
 			if(info){
-				logger.info("{}, average:{} micro, time > {}ms: {}", desc, average/1000, tooLongBaseMilli, countLong);
-				logger.info("{}, max: {} micro, happen time:{}", desc, maxDelayNanos/1000, sdf.format(new Date(maxDelayTime)));
+				logger.info("{}, count:{}, average:{} us, time > {}ms: {}", infoMetric, countDelta, average/1000, tooLongBaseMilli, countLong);
+				logger.info("{}, max: {} us, happen time:{}", infoMetric, maxDelayNanos/1000, sdf.format(new Date(maxDelayTime)));
 			}else{
-				logger.debug("{}, average:{} micro, time > {}ms: {}", desc, average/1000, tooLongBaseMilli, countLong);
-				logger.debug("{}, max: {} micro, happen time:{}", desc, maxDelayNanos/1000, sdf.format(new Date(maxDelayTime)));
+				logger.debug("{}, average:{} us, time > {}ms: {}", infoMetric, average/1000, tooLongBaseMilli, countLong);
+				logger.debug("{}, max: {} us, happen time:{}", infoMetric, maxDelayNanos/1000, sdf.format(new Date(maxDelayTime)));
 			}
-			
+			delayMetric.log(metric, metricSub, average);
 			maxDelayNanos = 0;
 			previousTotalCount = currentTotalCount;
 			previousTotalDelay = currentTotalDelay;

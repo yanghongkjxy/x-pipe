@@ -5,20 +5,18 @@ import com.ctrip.xpipe.observer.AbstractLifecycleObservable;
 import com.ctrip.xpipe.observer.NodeAdded;
 import com.ctrip.xpipe.redis.core.store.ReplicationStore;
 import com.ctrip.xpipe.redis.core.store.ReplicationStoreManager;
+import com.ctrip.xpipe.redis.core.util.NonFinalizeFileInputStream;
+import com.ctrip.xpipe.redis.core.util.NonFinalizeFileOutputStream;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.monitor.KeeperMonitor;
+import com.ctrip.xpipe.utils.ClusterShardAwareThreadFactory;
 import com.ctrip.xpipe.utils.FileUtils;
 import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import com.google.common.util.concurrent.MoreExecutors;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.FileFilter;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
 import java.util.Date;
 import java.util.Properties;
 import java.util.UUID;
@@ -28,9 +26,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-
-import com.ctrip.xpipe.redis.core.util.NonFinalizeFileInputStream;
-import com.ctrip.xpipe.redis.core.util.NonFinalizeFileOutputStream;
 
 /**
  * @author marsqing
@@ -84,7 +79,8 @@ public class DefaultReplicationStoreManager extends AbstractLifecycleObservable 
 	protected void doInitialize() throws Exception {
 		super.doInitialize();
 		
-		scheduled =  Executors.newScheduledThreadPool(1, XpipeThreadFactory.create("gc", true));
+		scheduled =  Executors.newScheduledThreadPool(1,
+				ClusterShardAwareThreadFactory.create(clusterName, shardName, "gc-" + String.format("%s-%s", clusterName, shardName)));
 		gcFuture = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
 			
 			@Override
@@ -121,6 +117,8 @@ public class DefaultReplicationStoreManager extends AbstractLifecycleObservable 
 	@Override
 	public synchronized ReplicationStore createIfNotExist() throws IOException {
 
+
+
 		ReplicationStore currentReplicationStore = null;
 		
 		try{
@@ -138,6 +136,10 @@ public class DefaultReplicationStoreManager extends AbstractLifecycleObservable 
 	
 	@Override
 	public synchronized ReplicationStore create() throws IOException {
+
+		if(!getLifecycleState().isInitialized()){
+			throw new ReplicationStoreManagerStateException("can not create", toString(), getLifecycleState().getPhaseName());
+		}
 		
 		keeperMonitor.getReplicationStoreStats().increateReplicationStoreCreateCount();
 
@@ -158,10 +160,6 @@ public class DefaultReplicationStoreManager extends AbstractLifecycleObservable 
 		return currentStore.get();
 	}
 
-	/**
-	 * @param name
-	 * @throws IOException
-	 */
 	private void recrodLatestStore(String storeDir) throws IOException {
 		Properties meta = currentMeta();
 		if (meta == null) {

@@ -1,32 +1,29 @@
 package com.ctrip.xpipe.redis.meta.server.cluster.impl;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-import org.apache.curator.framework.CuratorFramework;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-
 import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.api.factory.ObjectFactory;
 import com.ctrip.xpipe.api.lifecycle.TopElement;
 import com.ctrip.xpipe.lifecycle.AbstractLifecycle;
 import com.ctrip.xpipe.redis.core.meta.MetaZkConfig;
+import com.ctrip.xpipe.redis.meta.server.cluster.ClusterException;
 import com.ctrip.xpipe.redis.meta.server.cluster.SLOT_STATE;
 import com.ctrip.xpipe.redis.meta.server.cluster.SlotInfo;
 import com.ctrip.xpipe.redis.meta.server.cluster.SlotManager;
 import com.ctrip.xpipe.redis.meta.server.config.MetaServerConfig;
 import com.ctrip.xpipe.utils.MapUtils;
+import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import com.ctrip.xpipe.zk.ZkClient;
+import org.apache.curator.framework.CuratorFramework;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Set;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * @author wenchao.meng
@@ -49,7 +46,7 @@ public class DefaultSlotManager extends AbstractLifecycle implements SlotManager
 	
 	private Map<Integer, Set<Integer>> serverMap = new ConcurrentHashMap<>();
 	
-	private ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1);
+	private ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1, XpipeThreadFactory.create(getClass().getSimpleName()));
 	
 	private ScheduledFuture<?> future;
 	
@@ -137,21 +134,25 @@ public class DefaultSlotManager extends AbstractLifecycle implements SlotManager
 	}
 
 	@Override
-	public void refresh() throws Exception {
+	public void refresh() throws ClusterException {
 		
 		doRefresh();
 	}
 	
 	@Override
-	public void refresh(int... slotIds) throws Exception {
+	public void refresh(int... slotIds) throws ClusterException {
 		
 		String slotsPath = MetaZkConfig.getMetaServerSlotsPath();
 		CuratorFramework client = zkClient.get();
 
 		Map<Integer, SlotInfo> slotsInfo = new HashMap<>();
 		for(int slotId : slotIds){
-
-			byte[] slotContent = client.getData().forPath(slotsPath + "/" + String.valueOf(slotId));
+			byte[] slotContent = new byte[0];
+			try {
+				slotContent = client.getData().forPath(slotsPath + "/" + String.valueOf(slotId));
+			} catch (Exception e) {
+				throw new ClusterException("get data for:" + slotId, e);
+			}
 			SlotInfo slotInfo = Codec.DEFAULT.decode(slotContent, SlotInfo.class);
 			slotsInfo.put(slotId, slotInfo);
 		}
@@ -179,26 +180,30 @@ public class DefaultSlotManager extends AbstractLifecycle implements SlotManager
 		
 	}
 
-	private void doRefresh() throws NumberFormatException, Exception {
+	private void doRefresh() throws ClusterException {
 		
 		logger.debug("[doRefresh]");
 		
 		Map<Integer, SlotInfo> slotsMap = new ConcurrentHashMap<>();
 		Map<Integer, Set<Integer>> serverMap = new ConcurrentHashMap<>();
-		
-		CuratorFramework client = zkClient.get();
-		String slotsPath = MetaZkConfig.getMetaServerSlotsPath();
-		for(String slotPath : client.getChildren().forPath(slotsPath)){
-			int slot = Integer.parseInt(slotPath);
-			byte[] slotContent = client.getData().forPath(slotsPath + "/" + slotPath);
-			SlotInfo slotInfo = Codec.DEFAULT.decode(slotContent, SlotInfo.class);
 
-			
-			Set<Integer> serverSlots = getOrCreateServerMap(serverMap, slotInfo.getServerId());			
-			serverSlots.add(slot);
-			slotsMap.put(slot, slotInfo);
+		try{
+			CuratorFramework client = zkClient.get();
+			String slotsPath = MetaZkConfig.getMetaServerSlotsPath();
+			for(String slotPath : client.getChildren().forPath(slotsPath)){
+				int slot = Integer.parseInt(slotPath);
+				byte[] slotContent = client.getData().forPath(slotsPath + "/" + slotPath);
+				SlotInfo slotInfo = Codec.DEFAULT.decode(slotContent, SlotInfo.class);
+
+
+				Set<Integer> serverSlots = getOrCreateServerMap(serverMap, slotInfo.getServerId());
+				serverSlots.add(slot);
+				slotsMap.put(slot, slotInfo);
+			}
+		}catch (Exception e){
+			throw new ClusterException("doRefersh", e);
 		}
-		
+
 		try{
 			lock.writeLock().lock();
 			this.slotsMap = slotsMap;
@@ -325,8 +330,12 @@ public class DefaultSlotManager extends AbstractLifecycle implements SlotManager
 
 	@Override
 	public int getSlotIdByKey(Object key) {
-		
-		return Math.abs(key.hashCode())%TOTAL_SLOTS;
+
+		int hash = key.hashCode();
+		if(hash == Integer.MIN_VALUE){
+			return 0;
+		}
+		return Math.abs(hash)%TOTAL_SLOTS;
 	}
 
 	@Override

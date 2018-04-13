@@ -1,24 +1,26 @@
 package com.ctrip.xpipe.redis.keeper.handler;
 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ExecutorService;
-
+import com.ctrip.xpipe.netty.ByteBufUtils;
+import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
+import com.ctrip.xpipe.redis.keeper.RedisClient;
+import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
+import io.netty.buffer.ByteBuf;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentMatcher;
 import org.mockito.Mock;
-import static org.mockito.Mockito.*;
 import org.mockito.runners.MockitoJUnitRunner;
 
-import com.ctrip.xpipe.netty.ByteBufUtils;
-import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
-import com.ctrip.xpipe.redis.keeper.RedisClient;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-import io.netty.buffer.ByteBuf;
+import static org.mockito.Mockito.argThat;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 
 /**
  * @author wenchao.meng
@@ -34,6 +36,9 @@ public class CommandHandlerManagerTest extends AbstractRedisKeeperTest {
 
 	@Mock
 	private RedisClient redisClient;
+
+	@Mock
+	private RedisKeeperServer redisKeeperServer;
 
 	@Before
 	public void beforeCommandHandlerManagerTest() {
@@ -64,7 +69,9 @@ public class CommandHandlerManagerTest extends AbstractRedisKeeperTest {
 			}
 		}));
 
-		doNothing().when(redisClient).processCommandSequentially(argThat(new ArgumentMatcher<Runnable>() {
+		doReturn(redisKeeperServer).when(redisClient).getRedisKeeperServer();
+
+		doNothing().when(redisKeeperServer).processCommandSequentially(argThat(new ArgumentMatcher<Runnable>() {
 
 			@Override
 			public boolean matches(Object argument) {

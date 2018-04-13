@@ -1,20 +1,25 @@
 package com.ctrip.xpipe.redis.meta.server.job;
 
-import org.springframework.beans.factory.annotation.Autowired;
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.command.Command;
 import com.ctrip.xpipe.api.foundation.FoundationService;
 import com.ctrip.xpipe.api.lifecycle.TopElement;
-import com.ctrip.xpipe.api.retry.RetryTemplate;
 import com.ctrip.xpipe.command.AbstractCommand;
+import com.ctrip.xpipe.command.DefaultRetryCommandFactory;
+import com.ctrip.xpipe.command.RetryCommandFactory;
+import com.ctrip.xpipe.concurrent.DefaultExecutorFactory;
 import com.ctrip.xpipe.concurrent.OneThreadTaskExecutor;
 import com.ctrip.xpipe.lifecycle.AbstractLifecycle;
 import com.ctrip.xpipe.redis.core.console.ConsoleService;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.meta.server.MetaServerStateChangeHandler;
-import com.ctrip.xpipe.retry.RetryDelay;
-import com.ctrip.xpipe.retry.RetryNTimes;
+import com.ctrip.xpipe.tuple.Pair;
+import com.ctrip.xpipe.utils.OsUtils;
+import com.ctrip.xpipe.utils.XpipeThreadFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
@@ -24,10 +29,15 @@ import com.ctrip.xpipe.retry.RetryNTimes;
 public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaServerStateChangeHandler, TopElement{
 	
 	private int retryDelayBase = 10000;
+	private int maxScheduled = 4;
 	
 	@Autowired
 	private ConsoleService consoleService;
-	
+
+	private ExecutorService executors;
+
+	private ScheduledExecutorService scheduled;
+
 	private String dc = FoundationService.DEFAULT.getDataCenter();
 	
 	private OneThreadTaskExecutor oneThreadTaskExecutor;
@@ -43,17 +53,21 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 	@Override
 	protected void doInitialize() throws Exception {
 		super.doInitialize();
-		oneThreadTaskExecutor = new OneThreadTaskExecutor(getRetryTemplate(), "ConsoleNotify");
+		scheduled = Executors.newScheduledThreadPool(OsUtils.getMultiCpuOrMax(1, maxScheduled), XpipeThreadFactory.create("ConsoleNotifycationTaskScheduled"));
+		executors = DefaultExecutorFactory.createAllowCoreTimeout("ConsoleNotifycationTask", OsUtils.defaultMaxCoreThreadCount()).createExecutorService();
+		oneThreadTaskExecutor = new OneThreadTaskExecutor(getRetryFactory(), executors);
 	}
 	
 	@Override
 	protected void doDispose() throws Exception {
 		oneThreadTaskExecutor.destroy();
+		executors.shutdown();
+		scheduled.shutdown();
 		super.doDispose();
 	}
 	
 	@Override
-	public void keeperActiveElected(final String clusterId, final String shardId, final KeeperMeta activeKeeper) throws Exception {
+	public void keeperActiveElected(final String clusterId, final String shardId, final KeeperMeta activeKeeper) {
 		logger.info("[keeperActiveElected][called]{},{},{}",clusterId,shardId,activeKeeper);
 		Command<Void> command = new AbstractCommand<Void>() {
 
@@ -79,8 +93,8 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 
 	
 	@SuppressWarnings("rawtypes")
-	protected RetryTemplate getRetryTemplate() {
-		return RetryNTimes.retryForEver(new RetryDelay(retryDelayBase));
+	protected RetryCommandFactory getRetryFactory() {
+		return DefaultRetryCommandFactory.retryForever(scheduled, retryDelayBase);
 	}
 	
 	public void setConsoleService(ConsoleService consoleService) {

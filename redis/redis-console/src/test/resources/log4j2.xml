@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<configuration status="info"  packages="com.ctrip.xpipe.utils.log">
+<configuration status="INFO"  packages="com.ctrip.xpipe.utils.log">
 
+    <Properties>
+        <Property name="appName">xpipe-console</Property>
+        <Property name="delayLogName">redis-delay</Property>
+    </Properties>
     <Scripts>
         <Script name="filter.gv" language="js">
             java.lang.System.getProperty('log.console.close') == 'true'
@@ -22,7 +26,22 @@
                 <TimeBasedTriggeringPolicy/>
                 <SizeBasedTriggeringPolicy size="100 MB"/>
             </Policies>
-        </RollingFile>	
+        </RollingFile>
+
+        <RollingFile name="rollingRedisDelay" fileName="target/applogs/${delayLogName}.log"
+                     filePattern="target/applogs/${delayLogName}-%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="[%d{HH:mm:ss:SSS}]%t%m%xpEx%n"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="500 MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="5">
+                <Delete basePath="target/applogs" maxDepth="2">
+                    <IfFileName glob="${delayLogName}*.log.gz"/>
+                    <IfLastModified age="7d"/>
+                </Delete>
+            </DefaultRolloverStrategy>
+        </RollingFile>
 
     </appenders>
 
@@ -34,11 +53,19 @@
         <logger name="org.apache" level="WARN"/>
 
         <logger name="com.ctrip.xpipe.lifecycle.DefaultLifecycleState" level="WARN"/>
-        <logger name="com.ctrip.xpipe.redis.console.monitor.impl.StandaloneStatMonitor" level="DEBUG"/>
 		<logger name="com.ctrip.xpipe.lifecycle.DefaultRegistry" level="WARN"/>
-		<logger name="com.mchange.v2.c3p0.impl.AbstractPoolBackedDataSource" level="WARN"/>
-        <logger name="com.ctrip.xpipe.redis.console.health.action" level="DEBUG"/>
+        <logger name="com.ctrip.xpipe.redis.console.migration.status.migration.statemachine" level="DEBUG"/>
 
+        <logger name="com.ctrip.xpipe.redis.console.health.action.HealthStatus" level="DEBUG" additivity="false">
+            <appender-ref ref="rollingRedisDelay"/>
+        </logger>
+
+        <!--
+        <logger name="com.ctrip.xpipe.redis.console.health.sentinel.DefaultSentinelCollector" level="DEBUG"/>
+        <logger name="com.ctrip.xpipe.redis.console.health.sentinel.SentinelMonitor" level="DEBUG"/>
+        <logger name="com.ctrip.xpipe.redis.console.health.HealthChecker" level="DEBUG"/>
+        <logger name="com.ctrip.xpipe.redis.console.health.delay.DefaultDelayMonitor" level="DEBUG"/>
+        -->
         <root level="INFO">
         	<appender-ref ref="Console"/>
             <appender-ref ref="RollingFileInfo"/>

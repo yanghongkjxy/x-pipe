@@ -1,10 +1,9 @@
 package com.ctrip.xpipe.redis.keeper.handler;
 
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
-
 import com.ctrip.xpipe.redis.keeper.CommandHandler;
 import com.ctrip.xpipe.redis.keeper.RedisClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * @author wenchao.meng
@@ -20,6 +19,12 @@ public abstract class AbstractCommandHandler implements CommandHandler{
 		doHandle(args, redisClient);
 	}
 
+	/**
+	 * when implements this method, should not block or sleep
+	 * @param args
+	 * @param redisClient
+	 * @throws Exception
+	 */
 	protected abstract void doHandle(String[] args, RedisClient redisClient) throws Exception;
 	
 	@Override

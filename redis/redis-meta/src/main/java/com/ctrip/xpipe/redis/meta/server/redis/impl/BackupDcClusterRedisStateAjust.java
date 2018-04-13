@@ -1,10 +1,5 @@
 package com.ctrip.xpipe.redis.meta.server.redis.impl;
 
-import java.net.InetSocketAddress;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.ScheduledExecutorService;
-
 import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.api.command.CommandFutureListener;
 import com.ctrip.xpipe.api.server.Server.SERVER_ROLE;
@@ -18,6 +13,12 @@ import com.ctrip.xpipe.redis.core.protocal.pojo.Role;
 import com.ctrip.xpipe.redis.core.protocal.pojo.SlaveRole;
 import com.ctrip.xpipe.redis.meta.server.job.DefaultSlaveOfJob;
 import com.ctrip.xpipe.redis.meta.server.meta.CurrentMetaManager;
+
+import java.net.InetSocketAddress;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
@@ -33,11 +34,15 @@ public class BackupDcClusterRedisStateAjust extends AbstractClusterRedisStateAju
 	private XpipeNettyClientKeyedObjectPool pool;
 	
 	private ScheduledExecutorService scheduled;
+
+	private Executor executors;
 	
-	public BackupDcClusterRedisStateAjust(String clusterId, CurrentMetaManager currentMetaManager, XpipeNettyClientKeyedObjectPool pool, ScheduledExecutorService scheduled) {
+	public BackupDcClusterRedisStateAjust(String clusterId, CurrentMetaManager currentMetaManager, XpipeNettyClientKeyedObjectPool pool, ScheduledExecutorService scheduled, Executor executors) {
 		this.clusterId = clusterId;
 		this.currentMetaManager = currentMetaManager;
 		this.pool = pool;
+		this.scheduled = scheduled;
+		this.executors = executors;
 	}
 	
 
@@ -64,8 +69,8 @@ public class BackupDcClusterRedisStateAjust extends AbstractClusterRedisStateAju
 				continue;
 			}
 			
-			logger.info("[doRun][change state]{}, {}", keeperActive, redisesNeedChange);
-			new DefaultSlaveOfJob(redisesNeedChange, keeperActive.getIp(), keeperActive.getPort(), pool, scheduled).
+			logger.info("[doRun][change state]{}, {}, {}", clusterId, keeperActive, redisesNeedChange);
+			new DefaultSlaveOfJob(redisesNeedChange, keeperActive.getIp(), keeperActive.getPort(), pool, scheduled, executors).
 			execute().addListener(new CommandFutureListener<Void>() {
 				
 				@Override
@@ -74,7 +79,7 @@ public class BackupDcClusterRedisStateAjust extends AbstractClusterRedisStateAju
 						logger.error("[operationComplete][fail]" + commandFuture.command(), commandFuture.cause());
 					}
 				}
-			});;
+			});
 		}
 	}
 
@@ -86,7 +91,10 @@ public class BackupDcClusterRedisStateAjust extends AbstractClusterRedisStateAju
 			
 			try{
 				boolean change = false;
-				RoleCommand roleCommand = new RoleCommand(pool.getKeyPool(new InetSocketAddress(redisMeta.getIp(), redisMeta.getPort())), false, scheduled);
+				RoleCommand roleCommand = new RoleCommand(
+						pool.getKeyPool(new InetSocketAddress(redisMeta.getIp(), redisMeta.getPort())),
+						1000,
+						false, scheduled);
 				Role role = roleCommand.execute().get();
 				
 				if(role.getServerRole() == SERVER_ROLE.MASTER){

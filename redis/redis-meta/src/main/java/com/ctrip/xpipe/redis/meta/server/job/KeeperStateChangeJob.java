@@ -1,28 +1,25 @@
 package com.ctrip.xpipe.redis.meta.server.job;
 
-import java.net.InetSocketAddress;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.ScheduledExecutorService;
-
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.command.Command;
 import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.api.command.CommandFutureListener;
 import com.ctrip.xpipe.api.pool.SimpleKeyedObjectPool;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
-import com.ctrip.xpipe.command.AbstractCommand;
-import com.ctrip.xpipe.command.CommandExecutionException;
-import com.ctrip.xpipe.command.CommandRetryWrapper;
-import com.ctrip.xpipe.command.ParallelCommandChain;
-import com.ctrip.xpipe.command.SequenceCommandChain;
+import com.ctrip.xpipe.command.*;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.pool.XpipeObjectPoolFromKeyed;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.meta.KeeperState;
 import com.ctrip.xpipe.redis.core.protocal.cmd.AbstractKeeperCommand.KeeperSetStateCommand;
 import com.ctrip.xpipe.retry.RetryDelay;
+import com.ctrip.xpipe.tuple.Pair;
+import com.ctrip.xpipe.utils.StringUtil;
+
+import java.net.InetSocketAddress;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
@@ -37,21 +34,23 @@ public class KeeperStateChangeJob extends AbstractCommand<Void>{
 	private int delayBaseMilli = 1000;
 	private int retryTimes = 5;
 	private ScheduledExecutorService scheduled;
+	private Executor executors;
 	private Command<?> activeSuccessCommand;
 
 	public KeeperStateChangeJob(List<KeeperMeta> keepers, Pair<String, Integer> activeKeeperMaster, SimpleKeyedObjectPool<InetSocketAddress, NettyClient> clientPool
-			, ScheduledExecutorService scheduled){
-		this(keepers, activeKeeperMaster, clientPool, 1000, 5, scheduled);
+			, ScheduledExecutorService scheduled, Executor executors){
+		this(keepers, activeKeeperMaster, clientPool, 1000, 5, scheduled, executors);
 	}
 	
 	public KeeperStateChangeJob(List<KeeperMeta> keepers, Pair<String, Integer> activeKeeperMaster, SimpleKeyedObjectPool<InetSocketAddress, NettyClient> clientPool
-			, int delayBaseMilli, int retryTimes, ScheduledExecutorService scheduled){
+			, int delayBaseMilli, int retryTimes, ScheduledExecutorService scheduled, Executor executors){
 		this.keepers = new LinkedList<>(keepers);
 		this.activeKeeperMaster = activeKeeperMaster;
 		this.clientPool = clientPool;
 		this.delayBaseMilli = delayBaseMilli;
 		this.retryTimes = retryTimes;
 		this.scheduled = scheduled;
+		this.executors = executors;
 	}
 
 	@Override
@@ -81,7 +80,7 @@ public class KeeperStateChangeJob extends AbstractCommand<Void>{
 			chain.add(setActiveCommand);
 		}
 
-		ParallelCommandChain backupChain = new ParallelCommandChain();
+		ParallelCommandChain backupChain = new ParallelCommandChain(executors);
 		
 		for(KeeperMeta keeperMeta : keepers){
 			if(!keeperMeta.isActive()){
@@ -131,10 +130,17 @@ public class KeeperStateChangeJob extends AbstractCommand<Void>{
 			public void operationComplete( CommandFuture commandFuture) throws Exception {
 				
 				if(commandFuture.isSuccess() && activeSuccessCommand != null){
-					logger.info("[addActiveCommandHook][set active success, execute hook]{}", setActiveCommand, activeSuccessCommand);
+					logger.info("[addActiveCommandHook][set active success, execute hook]{}, {}", setActiveCommand, activeSuccessCommand);
 					activeSuccessCommand.execute();
 				}
 			}
 		});
+	}
+
+	@Override
+	public String toString() {
+		return String.format("[%s] master: %s",
+				StringUtil.join(",", (keeper) -> String.format("%s.%s", keeper.desc(), keeper.isActive()), keepers),
+				activeKeeperMaster);
 	}
 }

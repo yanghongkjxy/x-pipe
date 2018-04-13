@@ -5,7 +5,6 @@ import com.ctrip.xpipe.api.server.Server.SERVER_ROLE;
 import com.ctrip.xpipe.redis.core.protocal.MASTER_STATE;
 import com.ctrip.xpipe.redis.core.protocal.protocal.ArrayParser;
 import com.ctrip.xpipe.utils.ObjectUtils;
-
 import io.netty.buffer.ByteBuf;
 
 /**
@@ -54,6 +53,7 @@ public class SlaveRole extends AbstractRole {
 		return masterOffset;
 	}
 
+	@Override
 	public ByteBuf format() {
 		Object[] tmp = new Object[] { serverRole.toString(), masterHost, masterPort, masterState.getDesc(),
 				masterOffset };

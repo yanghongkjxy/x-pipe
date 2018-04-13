@@ -1,17 +1,5 @@
 package com.ctrip.xpipe.redis.keeper.store;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.ctrip.xpipe.api.utils.ControllableFile;
 import com.ctrip.xpipe.api.utils.FileSize;
 import com.ctrip.xpipe.netty.ByteBufUtils;
@@ -25,8 +13,19 @@ import com.ctrip.xpipe.redis.core.store.RdbStore;
 import com.ctrip.xpipe.redis.core.store.RdbStoreListener;
 import com.ctrip.xpipe.utils.DefaultControllableFile;
 import com.ctrip.xpipe.utils.SizeControllableFile;
-
 import io.netty.buffer.ByteBuf;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 public class DefaultRdbStore extends AbstractStore implements RdbStore {
 
@@ -285,11 +284,11 @@ public class DefaultRdbStore extends AbstractStore implements RdbStore {
 			return new SizeControllableFile(file, new FileSize() {
 				
 				@Override
-				public long getSize(FileChannel fileChannel) throws IOException {
+				public long getSize(LongSupplier realSizeProvider) {
 					
 					long realSize = 0;
 					synchronized (truncateLock) {//truncate may make size wrong
-						realSize = fileChannel.size();
+						realSize = realSizeProvider.getAsLong();
 					}
 					
 					if(status.get() == Status.Writing){

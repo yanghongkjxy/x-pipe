@@ -47,9 +47,44 @@ services.service('ClusterService', ['$resource', '$q', function ($resource, $q) 
         unbind_dc: {
             method: 'DELETE',
             url: '/console/clusters/:clusterName/dcs/:dcName'
+        },
+        get_all_organizations: {
+            method: 'GET',
+            url: '/console/organizations',
+            isArray : true
+        },
+        get_involved_organizations: {
+            method: 'GET',
+            url: '/console/involved/organizations',
+            isArray : true
+        },
+        get_unhealthy_clusters: {
+            method: 'GET',
+            url: '/console/clusters/unhealthy',
+            isArray: true
         }
     });
+    function getInvolvedOrgs() {
+        var d = $q.defer();
+        resource.get_involved_organizations({},
+            function(result) {
+                d.resolve(result);
+            }, function(result) {
+                d.reject(result);
+            });
+        return d.promise;
+    }
 
+    function getOrganizations() {
+        var d = $q.defer();
+        resource.get_all_organizations({},
+            function(result) {
+            d.resolve(result);
+        }, function(result) {
+            d.reject(result);
+        });
+        return d.promise;
+    }
     function getClustersCount() {
     	var d = $q.defer();
     	resource.get_clusters_count({},
@@ -193,6 +228,16 @@ services.service('ClusterService', ['$resource', '$q', function ($resource, $q) 
         return d.promise;
     }
 
+    function getUnhealthyClusters() {
+        var d = $q.defer();
+        resource.get_unhealthy_clusters({},
+            function (result) {
+                d.resolve(result);
+            }, function (result) {
+                d.reject(result);
+            });
+        return d.promise;
+    }
     return {
         load_cluster: loadCluster,
         findClusterDCs: findClusterDCs,
@@ -204,6 +249,9 @@ services.service('ClusterService', ['$resource', '$q', function ($resource, $q) 
         findClusterBatch : findClusterBatch,
         getClustersCount : getClustersCount,
         bindDc: bindDc,
-        unbindDc: unbindDc
+        unbindDc: unbindDc,
+        getOrganizations: getOrganizations,
+        getInvolvedOrgs: getInvolvedOrgs,
+        getUnhealthyClusters: getUnhealthyClusters
     }
 }]);

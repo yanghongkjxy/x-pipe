@@ -1,14 +1,13 @@
 package com.ctrip.xpipe.redis.integratedtest.keeper.manul;
 
-import java.io.IOException;
-
-import org.junit.Test;
-
-import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.integratedtest.keeper.AbstractKeeperIntegratedSingleDc;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.config.TestKeeperConfig;
+import io.netty.util.ResourceLeakDetector;
+import org.junit.Test;
+
+import java.io.IOException;
 
 /**
  * @author wenchao.meng
@@ -16,7 +15,14 @@ import com.ctrip.xpipe.redis.keeper.config.TestKeeperConfig;
  * Sep 29, 2016
  */
 public class OneKeeper extends AbstractKeeperIntegratedSingleDc{
-	
+
+	@Override
+	public void beforeAbstractTest() throws Exception {
+		super.beforeAbstractTest();
+		ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.SIMPLE);
+
+	}
+
 	@Test
 	public void statePreActive() throws IOException{
 		
@@ -44,13 +50,6 @@ public class OneKeeper extends AbstractKeeperIntegratedSingleDc{
 	
 	@Test
 	public void testRedis() throws Exception{
-		
-		RedisMeta redis8000 = new RedisMeta().setIp("localhost").setPort(8000);
-		startRedis(getDcMeta(), redis8000);
-		
-		startRedis(getDcMeta(), redisMaster);
-		
-		
 		
 		waitForAnyKeyToExit();
 	}

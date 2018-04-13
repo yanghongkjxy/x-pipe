@@ -1,15 +1,18 @@
 package com.ctrip.xpipe.redis.console.health.action;
 
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
-import com.ctrip.xpipe.metric.HostPort;
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.observer.AbstractObservable;
 import com.ctrip.xpipe.utils.DateTimeUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntSupplier;
 
 /**
  * @author wenchao.meng
@@ -18,22 +21,23 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public class HealthStatus extends AbstractObservable{
 
-    public static final int REDIS_UNKNOWN_STATE = -1;
-    public static final int REDIS_DOWN_STATE = 0;
-    public static final int REDIS_UP_STATE = 1;
+    private static long UNSET_TIME = -1L;
 
-    private AtomicLong lastPongTime = new AtomicLong(System.currentTimeMillis());
-    private AtomicLong lastHealthDelayTime = new AtomicLong(System.currentTimeMillis());
+    private AtomicLong lastPongTime = new AtomicLong(UNSET_TIME);
+    private AtomicLong lastHealthDelayTime = new AtomicLong(UNSET_TIME);
 
-    private AtomicInteger state = new AtomicInteger(REDIS_UNKNOWN_STATE);
+    private AtomicReference<HEALTH_STATE> state = new AtomicReference<>(HEALTH_STATE.UNKNOWN);
 
     private final HostPort hostPort;
-    private final int downAfterMilli;
-    private final int healthyDelayMilli;
+    private final IntSupplier downAfterMilli;
+    private final IntSupplier healthyDelayMilli;
+
     private final ScheduledExecutorService scheduled;
     private ScheduledFuture<?> future;
 
-    public HealthStatus(HostPort hostPort, int downAfterMilli, int healthyDelayMilli, ScheduledExecutorService scheduled){
+    private static Logger delayLogger = LoggerFactory.getLogger(HealthStatus.class.getName() + ".delay");
+
+    public HealthStatus(HostPort hostPort, IntSupplier downAfterMilli, IntSupplier healthyDelayMilli, ScheduledExecutorService scheduled){
         this.hostPort = hostPort;
         this.downAfterMilli = downAfterMilli;
         this.healthyDelayMilli = healthyDelayMilli;
@@ -51,13 +55,24 @@ public class HealthStatus extends AbstractObservable{
             @Override
             protected void doRun() throws Exception {
 
-                long currentTime = System.currentTimeMillis();
-                logger.debug("[checkDown]{} - {} = {} > {}", currentTime, lastHealthDelayTime, currentTime - lastHealthDelayTime.get(), downAfterMilli);
-                if (currentTime - lastHealthDelayTime.get() > downAfterMilli) {
-                    setDown();
+                if(lastHealthDelayTime.get() < 0){
+                    logger.debug("[last unhealthy time < 0, break]{}, {}", hostPort, lastHealthDelayTime);
+                    return;
                 }
+
+                long currentTime = System.currentTimeMillis();
+                logger.trace("[checkDown]{} - {} = {} > {}", currentTime, lastHealthDelayTime, currentTime - lastHealthDelayTime.get(), downAfterMilli.getAsInt());
+                long downTime = currentTime - lastHealthDelayTime.get();
+                final int  downAfter = downAfterMilli.getAsInt();
+
+                if ( downTime > downAfter) {
+                    setDown();
+                }else if(downTime >= downAfter/2){
+                    setUnhealthy();
+                }
+
             }
-        }, 0, downAfterMilli/5, TimeUnit.MILLISECONDS);
+        }, 0, downAfterMilli.getAsInt()/5, TimeUnit.MILLISECONDS);
     }
 
     void pong(){
@@ -66,8 +81,11 @@ public class HealthStatus extends AbstractObservable{
 
     void delay(long delayMilli){
 
-        logger.debug("[delay]{}, {}", hostPort, delayMilli);
-        if(delayMilli >=0 && delayMilli <= healthyDelayMilli){
+        //first time
+        lastHealthDelayTime.compareAndSet(UNSET_TIME, System.currentTimeMillis());
+
+        delayLogger.debug("{}, {}", hostPort, delayMilli);
+        if(delayMilli >= 0 && delayMilli <= healthyDelayMilli.getAsInt()){
             lastHealthDelayTime.set(System.currentTimeMillis());
             setUp();
         }
@@ -75,21 +93,29 @@ public class HealthStatus extends AbstractObservable{
 
     private void setUp() {
 
-        int preState = state.get();
-        state.set(REDIS_UP_STATE);
+        HEALTH_STATE preState = state.get();
+        state.set(HEALTH_STATE.UP);
 
-        if(preState != REDIS_UP_STATE){
+        if(preState.isToUpNotify()){
             logger.info("[setUp]{}", this);
             notifyObservers(new InstanceUp(hostPort));
         }
     }
 
+    private void setUnhealthy() {
+
+        HEALTH_STATE previous = state.getAndSet(HEALTH_STATE.UNHEALTHY);
+        if(previous != HEALTH_STATE.UNHEALTHY){
+            logger.info("[setUnhealthy]{}, {}", this, previous);
+        }
+    }
+
     private void setDown() {
 
-        int preState = state.get();
-        state.set(REDIS_DOWN_STATE);
+        HEALTH_STATE preState = state.get();
+        state.set(HEALTH_STATE.DOWN);
 
-        if(preState != REDIS_DOWN_STATE){
+        if(preState.isToDownNotify()){
             logger.info("[setDown]{}", this);
             notifyObservers(new InstanceDown(hostPort));
         }
@@ -102,7 +128,7 @@ public class HealthStatus extends AbstractObservable{
                 DateTimeUtils.timeAsString(lastHealthDelayTime.get()));
     }
 
-    public int getState() {
+    public HEALTH_STATE getState() {
         return state.get();
     }
 }

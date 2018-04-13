@@ -1,14 +1,5 @@
 package com.ctrip.xpipe.redis.keeper.impl;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.api.lifecycle.Releasable;
 import com.ctrip.xpipe.observer.AbstractObservable;
@@ -23,13 +14,21 @@ import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisSlave;
 import com.ctrip.xpipe.utils.ChannelUtil;
 import com.ctrip.xpipe.utils.ClusterShardAwareThreadFactory;
+import com.ctrip.xpipe.utils.IpUtils;
 import com.ctrip.xpipe.utils.StringUtil;
-
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author wenchao.meng
@@ -51,21 +50,18 @@ public class DefaultRedisClient extends AbstractObservable implements RedisClien
 	protected RedisKeeperServer redisKeeperServer;
 	
 	private CLIENT_ROLE clientRole = CLIENT_ROLE.NORMAL;
-	
-	private ExecutorService nonPsyncExecutor;
-	
+
 	public DefaultRedisClient(Channel channel, RedisKeeperServer redisKeeperServer) {
 		this.redisKeeperServer = redisKeeperServer;
 		
 		this.channel = channel;
 		String remoteIpLocalPort = ChannelUtil.getRemoteAddr(channel);
-		nonPsyncExecutor = Executors.newSingleThreadExecutor(ClusterShardAwareThreadFactory.create(redisKeeperServer.getClusterId(), redisKeeperServer.getShardId(), "RedisClient-" + remoteIpLocalPort));
 		channel.closeFuture().addListener(new ChannelFutureListener() {
 			
 			@Override
 			public void operationComplete(ChannelFuture future) throws Exception {
 				logger.info("[operationComplete][channel closed]{}, {}, {}", future.channel(), future.isDone(), future.isSuccess());
-				logger.info("[operationComplete]", future.cause());
+				logger.info("[operationComplete]{}", future.cause());
 				release();
 			}
 		});
@@ -208,10 +204,15 @@ public class DefaultRedisClient extends AbstractObservable implements RedisClien
 	}
 
 	@Override
+	public String ip() {
+		Channel channel = channel();
+		return channel == null? "null": IpUtils.getIp(channel.remoteAddress());
+	}
+
+	@Override
 	public void close() {
 		logger.info("[close]{}", this);
 		channel.close();
-		nonPsyncExecutor.shutdownNow();
 	}
 	
 	@Override
@@ -264,14 +265,9 @@ public class DefaultRedisClient extends AbstractObservable implements RedisClien
 	}
 
 	@Override
-	public void processCommandSequentially(Runnable runnable) {
-		nonPsyncExecutor.execute(runnable);
-	}
-
-	@Override
 	public void release() throws Exception {
 		logger.info("[release]{}", this);
-		nonPsyncExecutor.shutdownNow();
+		close();
 	}
 
 	@Override

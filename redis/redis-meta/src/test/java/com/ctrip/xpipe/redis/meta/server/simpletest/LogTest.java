@@ -1,10 +1,6 @@
 package com.ctrip.xpipe.redis.meta.server.simpletest;
 
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.Map.Entry;
-import java.util.Set;
-
+import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
 import org.apache.logging.log4j.core.config.plugins.util.PluginManager;
 import org.apache.logging.log4j.core.config.plugins.util.PluginType;
 import org.apache.logging.log4j.core.pattern.PatternConverter;
@@ -12,7 +8,10 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.Map.Entry;
+import java.util.Set;
 
 
 /**
@@ -26,7 +25,11 @@ public class LogTest extends AbstractMetaServerTest{
 	
 	@Test
 	public void testHash(){
-		
+
+		Class<?> clazz = getClass();
+
+		System.out.println(clazz);
+
 		System.out.println("cluster_ly".hashCode()%256);
 		
 	}

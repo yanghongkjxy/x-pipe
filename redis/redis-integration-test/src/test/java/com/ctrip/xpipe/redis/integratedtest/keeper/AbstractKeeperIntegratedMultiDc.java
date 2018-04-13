@@ -1,20 +1,15 @@
 package com.ctrip.xpipe.redis.integratedtest.keeper;
 
-import java.io.IOException;
-import java.util.List;
-
-import org.apache.commons.exec.ExecuteException;
-import org.junit.Before;
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.cluster.LeaderElectorManager;
-import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
-import com.ctrip.xpipe.redis.core.entity.DcMeta;
-import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
-import com.ctrip.xpipe.redis.core.entity.RedisMeta;
-import com.ctrip.xpipe.redis.core.entity.ShardMeta;
+import com.ctrip.xpipe.redis.core.entity.*;
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
 import com.ctrip.xpipe.redis.meta.server.job.KeeperStateChangeJob;
+import com.ctrip.xpipe.tuple.Pair;
+import org.apache.commons.exec.ExecuteException;
+import org.junit.Before;
+
+import java.io.IOException;
+import java.util.List;
 
 /**
  * @author wenchao.meng
@@ -88,13 +83,13 @@ public class AbstractKeeperIntegratedMultiDc extends AbstractKeeperIntegrated{
 		List<KeeperMeta> keepers = getDcKeepers(dcMeta.getId(), getClusterId(), getShardId());
 		RedisMeta redisMaster = getRedisMaster();
 		
-		KeeperStateChangeJob job = new KeeperStateChangeJob(keepers, new Pair<String, Integer>(redisMaster.getIp(), redisMaster.getPort()), getXpipeNettyClientKeyedObjectPool(), scheduled);
+		KeeperStateChangeJob job = new KeeperStateChangeJob(keepers, new Pair<String, Integer>(redisMaster.getIp(), redisMaster.getPort()), getXpipeNettyClientKeyedObjectPool(), scheduled, executors);
 		job.execute().sync();
 		
 		for(DcMeta backupDc : backupDcs()){
 			
 			List<KeeperMeta> backupKeepers = getDcKeepers(backupDc.getId(), getClusterId(), getShardId());
-			job = new KeeperStateChangeJob(backupKeepers, new Pair<String, Integer>(activeDcKeeperActive.getIp(), activeDcKeeperActive.getPort()), getXpipeNettyClientKeyedObjectPool(), scheduled);
+			job = new KeeperStateChangeJob(backupKeepers, new Pair<String, Integer>(activeDcKeeperActive.getIp(), activeDcKeeperActive.getPort()), getXpipeNettyClientKeyedObjectPool(), scheduled, executors);
 			job.execute().sync();
 		}
 	}
@@ -103,7 +98,7 @@ public class AbstractKeeperIntegratedMultiDc extends AbstractKeeperIntegrated{
 		
 		for(DcMeta dcMeta : getDcMetas()){
 			for(RedisMeta redisMeta : getDcRedises(dcMeta.getId(), getClusterId(), getShardId())){
-				startRedis(dcMeta, redisMeta);
+				startRedis(redisMeta);
 			}
 		}
 	}

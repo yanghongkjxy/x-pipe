@@ -1,27 +1,16 @@
 package com.ctrip.xpipe.redis.console.health.delay;
 
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-
-import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
-import com.ctrip.xpipe.redis.core.entity.DcMeta;
+import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.console.health.*;
+import com.ctrip.xpipe.redis.console.health.ping.PingService;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
-import com.ctrip.xpipe.redis.core.entity.ShardMeta;
+import com.ctrip.xpipe.utils.VisibleForTesting;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
-import com.ctrip.xpipe.metric.HostPort;
-import com.ctrip.xpipe.redis.console.health.BaseSampleMonitor;
-import com.ctrip.xpipe.redis.console.health.BaseSamplePlan;
-import com.ctrip.xpipe.redis.console.health.RedisSession;
-import com.ctrip.xpipe.redis.console.health.Sample;
-import com.ctrip.xpipe.redis.console.health.ping.PingService;
-import com.lambdaworks.redis.pubsub.RedisPubSubAdapter;
-import org.unidal.tuple.Pair;
+import java.util.List;
+import java.util.Map.Entry;
 
 /**
  * @author marsqing
@@ -36,7 +25,7 @@ public class DefaultDelayMonitor extends BaseSampleMonitor<InstanceDelayResult> 
 
 	public static final long SAMPLE_LOST_AND_NO_PONG = -99999L * 1000 * 1000;
 
-	private static final long SAMPLE_LOST_BUT_PONG = 99999L * 1000 * 1000;
+	public static final long SAMPLE_LOST_BUT_PONG = 99999L * 1000 * 1000;
 
 	@Autowired
 	private List<DelayCollector> delayCollectors;
@@ -46,7 +35,7 @@ public class DefaultDelayMonitor extends BaseSampleMonitor<InstanceDelayResult> 
 
 
 	@Override
-	public void startSample(BaseSamplePlan<InstanceDelayResult> plan) throws Exception {
+	public void startSample(BaseSamplePlan<InstanceDelayResult> plan) throws SampleException {
 		sampleDelay((DelaySamplePlan) plan);
 	}
 
@@ -54,7 +43,11 @@ public class DefaultDelayMonitor extends BaseSampleMonitor<InstanceDelayResult> 
 	protected void notifyCollectors(Sample<InstanceDelayResult> sample) {
 		DelaySampleResult sampleResult = convertToSampleResult(sample);
 		for (DelayCollector collector : delayCollectors) {
-			collector.collect(sampleResult);
+			try {
+				collector.collect(sampleResult);
+			} catch (Exception e) {
+				log.error("[DefaultDelayMonitor][notifyCollectors]{}", e);
+			}
 		}
 	}
 
@@ -85,52 +78,59 @@ public class DefaultDelayMonitor extends BaseSampleMonitor<InstanceDelayResult> 
 		return sampleResult;
 	}
 
-	private void sampleDelay(final DelaySamplePlan samplePlan) throws Exception {
+	private void sampleDelay(final DelaySamplePlan samplePlan) {
+
 		if (samplePlan.getHostPort2SampleResult().isEmpty()) {
 			return;
 		}
 
 		for (final HostPort hostPort : samplePlan.getHostPort2SampleResult().keySet()) {
 				RedisSession session = findRedisSession(hostPort.getHost(), hostPort.getPort());
-				session.subscribeIfAbsent(CHECK_CHANNEL, new RedisPubSubAdapter<String, String>() {
+				session.subscribeIfAbsent(CHECK_CHANNEL, new RedisSession.SubscribeCallback() {
 
 					@Override
 					public void message(String channel, String message) {
-						addInstanceResult(Long.parseLong(message, 16), hostPort.getHost(), hostPort.getPort(), null);
-				}
+						log.debug("[sampleDelay][message]{}, {}", hostPort, message);
+						addInstanceSuccess(Long.parseLong(message, 16), hostPort.getHost(), hostPort.getPort(), null);
+					}
 
-			});
-
+					@Override
+					public void fail(Throwable e) {
+						//nothing to do
+					}
+				});
 		}
 
-		RedisSession masterSession = findRedisSession(samplePlan.getMasterHost(), samplePlan.getMasterPort());
+		RedisSession masterSession = null;
+		if(samplePlan.getMasterHost() != null) {
+			masterSession = findRedisSession(samplePlan.getMasterHost(), samplePlan.getMasterPort());
+		}
 		long startNanoTime = recordSample(samplePlan);
-		masterSession.publish(CHECK_CHANNEL, Long.toHexString(startNanoTime));
+		log.debug("[sampleDelay][publish]{}:{}", samplePlan.getMasterHost(), samplePlan.getMasterPort());
+		if(masterSession != null) {
+			masterSession.publish(CHECK_CHANNEL, Long.toHexString(startNanoTime));
+		}
 	}
 
 	@Override
-	public Collection<BaseSamplePlan<InstanceDelayResult>> generatePlan(List<DcMeta> dcMetas) {
+	protected void addRedis(BaseSamplePlan<InstanceDelayResult> plan, String dcId, RedisMeta redisMeta) {
 
-		Map<Pair<String, String>, BaseSamplePlan<InstanceDelayResult>> plans = new HashMap<>();
-
-		for (DcMeta dcMeta : dcMetas) {
-			for (ClusterMeta clusterMeta : dcMeta.getClusters().values()) {
-				for (ShardMeta shardMeta : clusterMeta.getShards().values()) {
-					Pair<String, String> cs = new Pair<>(clusterMeta.getId(), shardMeta.getId());
-					DelaySamplePlan plan = (DelaySamplePlan) plans.get(cs);
-					if (plan == null) {
-						plan = new DelaySamplePlan(clusterMeta.getId(), shardMeta.getId());
-						plans.put(cs, plan);
-					}
-
-					for (RedisMeta redisMeta : shardMeta.getRedises()) {
-						plan.addRedis(dcMeta.getId(), redisMeta);
-					}
-				}
-			}
-		}
-		return plans.values();
+		DelaySamplePlan delaySamplePlan = (DelaySamplePlan) plan;
+		delaySamplePlan.addRedis(dcId, redisMeta);
 	}
 
+	@Override
+	protected BaseSamplePlan<InstanceDelayResult> createPlan(String dcId, String clusterId, String shardId) {
+		return new DelaySamplePlan(clusterId, shardId);
+	}
 
+	@VisibleForTesting
+	protected void setDelayCollectors(List<DelayCollector> collectors) {
+		this.delayCollectors = collectors;
+	}
+
+	@VisibleForTesting
+	protected List<DelayCollector> getDelayCollectors() {
+		return this.delayCollectors;
+	}
 }

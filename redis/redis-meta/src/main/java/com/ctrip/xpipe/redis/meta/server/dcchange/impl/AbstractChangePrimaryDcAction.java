@@ -1,26 +1,23 @@
 package com.ctrip.xpipe.redis.meta.server.dcchange.impl;
 
-import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.pool.XpipeNettyClientKeyedObjectPool;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PRIMARY_DC_CHANGE_RESULT;
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PrimaryDcChangeMessage;
+import com.ctrip.xpipe.redis.core.protocal.pojo.MasterInfo;
 import com.ctrip.xpipe.redis.meta.server.dcchange.ChangePrimaryDcAction;
 import com.ctrip.xpipe.redis.meta.server.dcchange.ExecutionLog;
 import com.ctrip.xpipe.redis.meta.server.dcchange.SentinelManager;
 import com.ctrip.xpipe.redis.meta.server.job.KeeperStateChangeJob;
 import com.ctrip.xpipe.redis.meta.server.meta.CurrentMetaManager;
 import com.ctrip.xpipe.redis.meta.server.meta.DcMetaCache;
+import com.ctrip.xpipe.tuple.Pair;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.List;
+import java.util.concurrent.*;
 
 /**
  * @author wenchao.meng
@@ -35,7 +32,7 @@ public abstract class AbstractChangePrimaryDcAction implements ChangePrimaryDcAc
 	
 	protected int waitTimeoutSeconds = DEFAULT_CHANGE_PRIMARY_WAIT_TIMEOUT_SECONDS;
 	
-	protected ExecutionLog executionLog = new ExecutionLog();
+	protected ExecutionLog executionLog;
 	
 	protected DcMetaCache   dcMetaCache;
 	
@@ -47,19 +44,29 @@ public abstract class AbstractChangePrimaryDcAction implements ChangePrimaryDcAc
 	
 	protected ScheduledExecutorService scheduled;
 
-	public AbstractChangePrimaryDcAction(DcMetaCache dcMetaCache, CurrentMetaManager currentMetaManager, SentinelManager sentinelManager, XpipeNettyClientKeyedObjectPool keyedObjectPool, ScheduledExecutorService scheduled) {
+	protected Executor executors;
+
+	public AbstractChangePrimaryDcAction(DcMetaCache dcMetaCache,
+										 CurrentMetaManager currentMetaManager,
+										 SentinelManager sentinelManager,
+										 ExecutionLog executionLog,
+										 XpipeNettyClientKeyedObjectPool keyedObjectPool,
+										 ScheduledExecutorService scheduled,
+										 Executor executors) {
 		this.dcMetaCache = dcMetaCache;
 		this.currentMetaManager = currentMetaManager;
 		this.sentinelManager = sentinelManager;
+		this.executionLog = executionLog;
 		this.keyedObjectPool = keyedObjectPool;
 		this.scheduled = scheduled;
+		this.executors = executors;
 	}
 
 	@Override
-	public PrimaryDcChangeMessage changePrimaryDc(String clusterId, String shardId, String newPrimaryDc) {
+	public PrimaryDcChangeMessage changePrimaryDc(String clusterId, String shardId, String newPrimaryDc, MasterInfo masterInfo) {
 		
 		try{
-			return doChangePrimaryDc(clusterId, shardId, newPrimaryDc);
+			return doChangePrimaryDc(clusterId, shardId, newPrimaryDc, masterInfo);
 		}catch(Exception e){
 			executionLog.error(e.getMessage());
 			logger.error("[changePrimaryDc]" + clusterId + "," + shardId + "," + newPrimaryDc, e);
@@ -67,7 +74,7 @@ public abstract class AbstractChangePrimaryDcAction implements ChangePrimaryDcAc
 		}
 	}
 
-	protected abstract PrimaryDcChangeMessage doChangePrimaryDc(String clusterId, String shardId, String newPrimaryDc);
+	protected abstract PrimaryDcChangeMessage doChangePrimaryDc(String clusterId, String shardId, String newPrimaryDc, MasterInfo masterInfo);
 
 	protected abstract void changeSentinel(String clusterId, String shardId, Pair<String, Integer> newMaster);
 
@@ -78,7 +85,7 @@ public abstract class AbstractChangePrimaryDcAction implements ChangePrimaryDcAc
 		
 		KeeperStateChangeJob job = new KeeperStateChangeJob(keepers, 
 				new Pair<String, Integer>(newMaster.getKey(), newMaster.getValue()), 
-				keyedObjectPool, 1000, 1, scheduled);
+				keyedObjectPool, 1000, 1, scheduled, executors);
 		try {
 			job.execute().get(waitTimeoutSeconds/2, TimeUnit.SECONDS);
 			executionLog.info("[makeKeepersOk]success");

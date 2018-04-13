@@ -1,19 +1,5 @@
 package com.ctrip.xpipe.redis.console.monitor.impl;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.UnsupportedEncodingException;
-import java.lang.Thread.UncaughtExceptionHandler;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import org.xml.sax.SAXException;
-
 import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.redis.console.exception.LinkRouteBrokenException;
 import com.ctrip.xpipe.redis.console.monitor.AbstractStatMonitor;
@@ -25,9 +11,18 @@ import com.ctrip.xpipe.redis.console.monitor.statmodel.StandaloneStatModel.Stand
 import com.ctrip.xpipe.utils.FileUtils;
 import com.dianping.cat.Cat;
 import com.google.common.io.CharStreams;
-
+import org.xml.sax.SAXException;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UnsupportedEncodingException;
+import java.lang.Thread.UncaughtExceptionHandler;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.*;
 
 public class StandaloneStatMonitor extends AbstractStatMonitor implements StatMonitor, Runnable {
 	public static final String TEST_KEY = "xpipe-test";
@@ -44,12 +39,12 @@ public class StandaloneStatMonitor extends AbstractStatMonitor implements StatMo
 	}
 
 	public StandaloneStatMonitor(String configFile, long period, TimeUnit timeUnit)
-			throws UnsupportedEncodingException, IOException {
+			throws IOException {
 		standaloneStat = loadStatModel(configFile);
 		scheduled.scheduleAtFixedRate(this, 0, period, timeUnit);
 	}
 
-	protected StandaloneStatModel loadStatModel(String configFile) throws UnsupportedEncodingException, IOException {
+	private StandaloneStatModel loadStatModel(String configFile) throws IOException {
 		InputStream ins = FileUtils.getFileInputStream(configFile);
 		return Codec.DEFAULT.decode(CharStreams.toString(new InputStreamReader(ins, "UTF-8")),
 				StandaloneStatModel.class);

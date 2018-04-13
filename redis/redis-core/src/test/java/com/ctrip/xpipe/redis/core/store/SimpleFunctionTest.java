@@ -1,12 +1,11 @@
 package com.ctrip.xpipe.redis.core.store;
 
-import org.apache.commons.lang3.builder.EqualsBuilder;
-import org.junit.Assert;
-import org.junit.Test;
-
 import com.alibaba.fastjson.JSON;
 import com.ctrip.xpipe.redis.core.AbstractRedisTest;
 import com.ctrip.xpipe.utils.ObjectUtils;
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.junit.Assert;
+import org.junit.Test;
 
 /**
  * @author wenchao.meng
@@ -44,10 +43,10 @@ public class SimpleFunctionTest extends AbstractRedisTest{
 		Person person1 = new Person(name1);
 		Person person2 = new Person(name2);
 
-		Assert.assertTrue(EqualsBuilder.reflectionEquals(person1, person2));;
+		Assert.assertTrue(EqualsBuilder.reflectionEquals(person1, person2));
 		
 		name2.hashCode();
-		Assert.assertTrue(EqualsBuilder.reflectionEquals(person1, person2));;
+		Assert.assertTrue(EqualsBuilder.reflectionEquals(person1, person2));
 	}
 	
 	public static class Person{

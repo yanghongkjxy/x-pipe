@@ -2,7 +2,6 @@ package com.ctrip.xpipe.redis.core.protocal.protocal;
 
 import com.ctrip.xpipe.redis.core.AbstractRedisTest;
 import com.ctrip.xpipe.redis.core.protocal.RedisClientProtocol;
-
 import io.netty.buffer.ByteBuf;
 /**
  * @author wenchao.meng
@@ -22,7 +21,7 @@ public class AbstractRedisProtocolTest extends AbstractRedisTest{
 		
 		for(int i = 0; i< contents.length;i++){
 			
-			byteBufs[i] = allocator.buffer();
+			byteBufs[i] = directByteBuf();
 			byteBufs[i].writeBytes(contents[i].getBytes());
 		}
 		

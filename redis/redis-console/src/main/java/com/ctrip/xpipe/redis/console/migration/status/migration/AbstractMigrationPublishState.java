@@ -1,17 +1,15 @@
 package com.ctrip.xpipe.redis.console.migration.status.migration;
 
+import com.ctrip.xpipe.api.migration.OuterClientService;
+import com.ctrip.xpipe.api.migration.OuterClientService.MigrationPublishResult;
+import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
+import com.ctrip.xpipe.redis.console.migration.model.MigrationShard;
+import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
+
 import java.net.InetSocketAddress;
 import java.util.LinkedList;
 import java.util.List;
-
-import com.ctrip.xpipe.api.migration.OuterClientService;
-import com.ctrip.xpipe.api.migration.OuterClientService.MigrationPublishResult;
-import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
-import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
-import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
-import com.ctrip.xpipe.redis.console.model.RedisTbl;
-import com.ctrip.xpipe.redis.console.model.ShardTbl;
-import com.ctrip.xpipe.redis.console.service.exception.ResourceNotFoundException;
 
 /**
  * @author shyin
@@ -30,23 +28,18 @@ public abstract class AbstractMigrationPublishState extends AbstractMigrationSta
 		return publishService;
 	}
 
-	
+	//for unit test
+	protected void setPublishService(OuterClientService publishService) {
+		this.publishService = publishService;
+	}
+
 	protected boolean publish() {
-		String cluster = getHolder().getCurrentCluster().getClusterName();
-		String newPrimaryDc = getHolder().getClusterDcs().get(getHolder().getMigrationCluster().getDestinationDcId()).getDcName();
-		List<InetSocketAddress> newMasters = new LinkedList<>();
-		for(ShardTbl shard : getHolder().getClusterShards().values()) {
-			InetSocketAddress addr = null;
-			try {
-				addr = getMasterAddress(getHolder().getRedisService().findAllByDcClusterShard(newPrimaryDc, cluster, shard.getShardName()));
-				if(null != addr) {
-					newMasters.add(addr);
-				}
-			} catch (ResourceNotFoundException e) {
-				throw new IllegalStateException("[publish]", e);
-			}
-		}
-		
+
+		String cluster = getHolder().clusterName();
+		String newPrimaryDc = getHolder().destDc();
+
+		List<InetSocketAddress> newMasters = getNewMasters();
+
 		boolean ret = false;
 		MigrationPublishResult res = null;
 		try {
@@ -66,27 +59,30 @@ public abstract class AbstractMigrationPublishState extends AbstractMigrationSta
 		return ret;
  	}
 	
-	private InetSocketAddress getMasterAddress(List<RedisTbl> redises) {
-		InetSocketAddress res = null;
-		for(RedisTbl redis : redises) {
-			if(redis.isMaster()) {
-				res = InetSocketAddress.createUnresolved(redis.getRedisIp(), redis.getRedisPort());
-			}
-		}
-		return res;
-	}
-	
 	private void updateMigrationPublishResult(MigrationPublishResult res) {
 		if(null != res) {
-			MigrationClusterTbl migrationCluster = getHolder().getMigrationCluster();
-			migrationCluster.setPublishInfo(res.toString());
-			getHolder().getMigrationService().updateMigrationCluster(migrationCluster);
+			getHolder().updatePublishInfo(res.toString());
 		}
 	}
 	
 	@Override
 	public void refresh() {
 		// Nothing to do
-		logger.debug("[]{}",getClass().toString(), getHolder().getCurrentCluster().getClusterName());
+		logger.debug("[]{}",getClass().toString(), getHolder().clusterName());
+	}
+
+	public List<InetSocketAddress> getNewMasters() {
+
+		List<InetSocketAddress> result = new LinkedList<>();
+		for(MigrationShard migrationShard : getHolder().getMigrationShards()){
+			HostPort newMasterAddress = migrationShard.getNewMasterAddress();
+			if(newMasterAddress == null){
+				//may force publish
+				logger.warn("[getNewMasters][null master]{}", migrationShard.shardName());
+				continue;
+			}
+			result.add(InetSocketAddress.createUnresolved(newMasterAddress.getHost(), newMasterAddress.getPort()));
+		}
+		return result;
 	}
 }

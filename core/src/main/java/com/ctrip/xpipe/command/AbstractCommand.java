@@ -40,6 +40,11 @@ public abstract class AbstractCommand<V> implements Command<V>{
 
 	@Override
 	public CommandFuture<V> execute(Executor executors) {
+
+		if(future().isDone()){
+			logger.info("[execute][already done, reset]{}, {}", this, future().getNow());
+			reset();
+		}
 		
 		future().addListener(new CommandFutureListener<V>() {
 
@@ -60,6 +65,8 @@ public abstract class AbstractCommand<V> implements Command<V>{
 				}catch(Exception e){
 					if(!future().isDone()){
 						future().setFailure(e);
+					}else {
+						logger.error("[execute][done, but exception]" + this, e);
 					}
 				}
 			}
@@ -97,7 +104,7 @@ public abstract class AbstractCommand<V> implements Command<V>{
 
 	@Override
 	public String toString() {
-		return "Command:" + getName();
+		return String.format("CMD[%s]", getName());
 	}
 	
 }

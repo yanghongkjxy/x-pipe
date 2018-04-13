@@ -1,62 +1,97 @@
 package com.ctrip.xpipe.redis.keeper.simple.load;
 
-import java.net.InetSocketAddress;
-
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.redis.keeper.simple.AbstractLoadRedis;
-
 import redis.clients.jedis.Jedis;
+
+import java.net.InetSocketAddress;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author wenchao.meng
- *
+ *         <p>
  *         May 23, 2016
  */
 public class SimpleSendMessage extends AbstractLoadRedis {
 
-	private final int messageSize = 1 << 10;
+    private final int messageSize = 1 << 10;
 
-	private String message;
+    private int concurrent = 10;
 
-	public SimpleSendMessage(InetSocketAddress master) {
-		super(master);
-		message = createMessage(messageSize);
-	}
+    private int expire = 0;
 
-	private String createMessage(int messageSize) {
+    private String message;
 
-		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < messageSize; i++) {
-			sb.append('c');
-		}
-		return sb.toString();
-	}
+    public SimpleSendMessage(InetSocketAddress master) {
+        super(master);
+        message = createMessage(messageSize);
+    }
 
-	@Override
-	protected void doStart() throws Exception {
-		super.doStart();
+    private String createMessage(int messageSize) {
 
-		try (Jedis jedis = new Jedis(master.getHostString(), master.getPort())) {
-			while (true) {
-				long index = increase();
-				if (index < 0) {
-					logger.info("[doStart][index < 0, break]{}", index);
-					break;
-				}
-				long keyIndex = getKeyIndex(index);
-				jedis.set(String.valueOf(keyIndex), message);
-			}
-		}
-		logger.info("[doStart][finish]");
-		System.exit(0);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < messageSize; i++) {
+            sb.append('c');
+        }
+        return sb.toString();
+    }
 
-	}
+    @Override
+    protected void doStart() throws Exception {
+        super.doStart();
 
-	public static void main(String[] args) throws Exception {
+        CountDownLatch latch = new CountDownLatch(concurrent);
 
-		SimpleSendMessage simpleSendMessage = new SimpleSendMessage(new InetSocketAddress("localhost", 6379));
-		simpleSendMessage.initialize();
-		simpleSendMessage.start();
+        for (int i = 0; i < concurrent; i++) {
 
-	}
+            executors.execute(new AbstractExceptionLogTask() {
+                @Override
+                public void doRun() throws InterruptedException {
+                    try {
+                        try (Jedis jedis = new Jedis(master.getHostString(), master.getPort())) {
+                            while (true) {
+                                long index = increase();
+                                if (index < 0) {
+                                    logger.info("[doStart][index < 0, break]{}", index);
+                                    break;
+                                }
+                                long keyIndex = getKeyIndex(index);
+                                if (expire > 0) {
+                                    jedis.setex(String.valueOf(keyIndex), expire, message);
+                                } else {
+                                    jedis.set(String.valueOf(keyIndex), message);
+                                }
+
+                                if(sleepMilli > 0){
+                                    TimeUnit.MILLISECONDS.sleep(sleepMilli);
+                                }
+                            }
+                        }
+                        logger.info("[doStart][finish]");
+                    } finally {
+                        latch.countDown();
+                    }
+                }
+            });
+        }
+
+        latch.await();
+        System.exit(0);
+    }
+
+    public static void main(String[] args) throws Exception {
+
+        SimpleSendMessage simpleSendMessage = new SimpleSendMessage(new InetSocketAddress("127.0.0.1", 6379));
+        simpleSendMessage.total = 1 << 23;
+        simpleSendMessage.sleepMilli = 10;
+        simpleSendMessage.expire = 0;
+        simpleSendMessage.concurrent = 200;
+        simpleSendMessage.current.set(1 << 22);
+        simpleSendMessage.setMaxKeyIndex(1 << 30);
+
+        simpleSendMessage.initialize();
+        simpleSendMessage.start();
+    }
 
 }

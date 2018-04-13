@@ -3,11 +3,7 @@ package com.ctrip.xpipe.redis.console.service.meta.impl;
 import com.ctrip.xpipe.redis.console.exception.DataNotFoundException;
 import com.ctrip.xpipe.redis.console.exception.ServerException;
 import com.ctrip.xpipe.redis.console.migration.status.ClusterStatus;
-import com.ctrip.xpipe.redis.console.model.ClusterTbl;
-import com.ctrip.xpipe.redis.console.model.DcClusterTbl;
-import com.ctrip.xpipe.redis.console.model.DcTbl;
-import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
-import com.ctrip.xpipe.redis.console.model.ShardTbl;
+import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
@@ -20,16 +16,11 @@ import com.ctrip.xpipe.redis.console.service.vo.DcMetaQueryVO;
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.DcMeta;
 import com.google.common.base.Strings;
-
-import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.concurrent.*;
 
 /**
  * @author shyin
@@ -56,18 +47,16 @@ public class ClusterMetaServiceImpl extends AbstractMetaService implements Clust
 		ClusterMeta clusterMeta = new ClusterMeta();
 		clusterTbl.setActivedcId(getClusterMetaCurrentPrimaryDc(dcMetaQueryVO.getCurrentDc(), clusterTbl));
 		
-		if (null != clusterTbl) {
-			clusterMeta.setId(clusterTbl.getClusterName());
-			for (DcClusterTbl dcCluster : dcMetaQueryVO.getAllDcClusterMap().get(clusterTbl.getId())) {
-				if (dcCluster.getDcId() == clusterTbl.getActivedcId()) {
-					clusterMeta.setActiveDc(dcMetaQueryVO.getAllDcs().get(dcCluster.getDcId()).getDcName());
+		clusterMeta.setId(clusterTbl.getClusterName());
+		for (DcClusterTbl dcCluster : dcMetaQueryVO.getAllDcClusterMap().get(clusterTbl.getId())) {
+			if (dcCluster.getDcId() == clusterTbl.getActivedcId()) {
+				clusterMeta.setActiveDc(dcMetaQueryVO.getAllDcs().get(dcCluster.getDcId()).getDcName());
+			} else {
+				if (Strings.isNullOrEmpty(clusterMeta.getBackupDcs())) {
+					clusterMeta.setBackupDcs(dcMetaQueryVO.getAllDcs().get(dcCluster.getDcId()).getDcName());
 				} else {
-					if (Strings.isNullOrEmpty(clusterMeta.getBackupDcs())) {
-						clusterMeta.setBackupDcs(dcMetaQueryVO.getAllDcs().get(dcCluster.getDcId()).getDcName());
-					} else {
-						clusterMeta.setBackupDcs(clusterMeta.getBackupDcs() + ","
-								+ dcMetaQueryVO.getAllDcs().get(dcCluster.getDcId()).getDcName());
-					}
+					clusterMeta.setBackupDcs(clusterMeta.getBackupDcs() + ","
+							+ dcMetaQueryVO.getAllDcs().get(dcCluster.getDcId()).getDcName());
 				}
 			}
 		}
@@ -158,14 +147,12 @@ public class ClusterMetaServiceImpl extends AbstractMetaService implements Clust
 	}
 	
 	/** Perform differently with migrating cluster **/
-	protected long getClusterMetaCurrentPrimaryDc(DcTbl dcInfo, ClusterTbl clusterInfo) {
+	@Override
+	public long getClusterMetaCurrentPrimaryDc(DcTbl dcInfo, ClusterTbl clusterInfo) {
 		if (ClusterStatus.isSameClusterStatus(clusterInfo.getStatus(), ClusterStatus.Migrating)) {
-			List<MigrationClusterTbl> migrationClusterHistory = migrationService
-					.findAllMigrationCluster(clusterInfo.getId());
-			for (MigrationClusterTbl migrationCluster : migrationClusterHistory) {
-				if(dcInfo.getId() == migrationCluster.getDestinationDcId()) {
-					return migrationCluster.getDestinationDcId();
-				}
+			MigrationClusterTbl migrationCluster = migrationService.findLatestUnfinishedMigrationCluster(clusterInfo.getId());
+			if(migrationCluster != null && dcInfo.getId() == migrationCluster.getDestinationDcId()) {
+				return migrationCluster.getDestinationDcId();
 			}
 		}
 		return clusterInfo.getActivedcId();

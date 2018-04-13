@@ -1,14 +1,12 @@
 package com.ctrip.xpipe.redis.meta.server;
 
 
-
-import org.junit.After;
-import org.junit.Before;
-
 import com.ctrip.xpipe.redis.core.AbstractRedisTest;
 import com.ctrip.xpipe.redis.meta.server.config.DefaultMetaServerConfig;
 import com.ctrip.xpipe.redis.meta.server.config.MetaServerConfig;
 import com.ctrip.xpipe.testutils.MemoryPrinter;
+import org.junit.After;
+import org.junit.Before;
 
 /**
  * @author wenchao.meng
@@ -22,11 +20,12 @@ public class AbstractMetaServerTest extends AbstractRedisTest{
 	
 	protected MetaServerConfig  config = new DefaultMetaServerConfig();
 	
-	private MemoryPrinter memoryPrinter = new MemoryPrinter(500);
+	private MemoryPrinter memoryPrinter;
 	
 	@Before
 	public void beforeAbstractMetaServerTest() throws Exception{
-		
+
+		memoryPrinter = new MemoryPrinter(scheduled, 500);
 		memoryPrinter.start();
 	}
 

@@ -1,17 +1,11 @@
 package com.ctrip.xpipe.redis.keeper.protocal.cmd;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
-
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
-
 import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.api.command.CommandFutureListener;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
 import com.ctrip.xpipe.exception.XpipeException;
+import com.ctrip.xpipe.lifecycle.LifecycleHelper;
 import com.ctrip.xpipe.netty.NettyPoolUtil;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.redis.core.protocal.cmd.DefaultPsync;
@@ -20,9 +14,13 @@ import com.ctrip.xpipe.redis.core.redis.RunidGenerator;
 import com.ctrip.xpipe.redis.core.store.ReplicationStoreManager;
 import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
 import com.ctrip.xpipe.redis.keeper.store.DefaultReplicationStore;
-
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
 
 /**
  * @author wenchao.meng
@@ -31,7 +29,6 @@ import io.netty.buffer.ByteBufAllocator;
  */
 public class PsyncTest extends AbstractRedisKeeperTest{
 	
-	private ByteBufAllocator allocator  = ByteBufAllocator.DEFAULT;
 	private DefaultPsync psync;
 	
 	private ReplicationStoreManager replicationStoreManager;
@@ -49,6 +46,7 @@ public class PsyncTest extends AbstractRedisKeeperTest{
 		
 		masterOffset = (long) randomInt(0, Integer.MAX_VALUE - 1);
 		replicationStoreManager = createReplicationStoreManager();
+		LifecycleHelper.initializeIfPossible(replicationStoreManager);
 		replicationStore = (DefaultReplicationStore) replicationStoreManager.create();
 		
 		SimpleObjectPool<NettyClient> clientPool = NettyPoolUtil.createNettyPool(new InetSocketAddress("127.0.0.1", 1234));
@@ -74,7 +72,7 @@ public class PsyncTest extends AbstractRedisKeeperTest{
 		};
 		//create store
 		replicationStore.beginRdb(masterId, masterOffset, new LenEofType(0));
-		replicationStore.getRdbStore().endRdb();;
+		replicationStore.getRdbStore().endRdb();
 		
 		runData(data);
 	}
@@ -138,7 +136,7 @@ public class PsyncTest extends AbstractRedisKeeperTest{
 		};
 		//create store
 		replicationStore.beginRdb(masterId, masterOffset, new LenEofType(0));
-		replicationStore.getRdbStore().endRdb();;
+		replicationStore.getRdbStore().endRdb();
 		
 		Long secondReplIdOffset = replicationStore.getEndOffset() + 1;
 
@@ -237,7 +235,7 @@ public class PsyncTest extends AbstractRedisKeeperTest{
 			
 			byte []bdata = data[i].getBytes();
 			
-			byteBufs[i] = allocator.buffer(bdata.length); 
+			byteBufs[i] = directByteBuf(bdata.length);
 			byteBufs[i].writeBytes(bdata);
 		}
 		

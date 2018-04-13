@@ -1,10 +1,10 @@
 package com.ctrip.xpipe.redis.console.health;
 
+import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.core.entity.RedisMeta;
+
 import java.util.HashMap;
 import java.util.Map;
-
-import com.ctrip.xpipe.metric.HostPort;
-import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 
 /**
  * @author marsqing
@@ -46,5 +46,9 @@ public abstract class BaseSamplePlan<T> {
 	@Override
 	public String toString() {
 		return String.format("cluster:%s, shard:%s, hosts:%s", clusterId, shardId, hostPort2SampleResult.keySet());
+	}
+
+	public boolean isEmpty() {
+		return hostPort2SampleResult.isEmpty();
 	}
 }

@@ -1,20 +1,17 @@
 package com.ctrip.xpipe.redis.integratedtest.keeper;
 
-import java.io.IOException;
-import java.util.LinkedList;
-import java.util.List;
-
-import org.apache.commons.exec.ExecuteException;
-import org.junit.Assert;
-import org.junit.Test;
-
-import com.ctrip.xpipe.redis.core.entity.DcMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.core.meta.KeeperState;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.config.TestKeeperConfig;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.io.IOException;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * @author wenchao.meng
@@ -127,10 +124,10 @@ public class KeeperPsync2 extends AbstractKeeperIntegratedSingleDc {
 	}
 
 	@Override
-	protected void startRedis(DcMeta dcMeta, RedisMeta redisMeta) throws ExecuteException, IOException {
+	protected void startRedis(RedisMeta redisMeta) throws IOException {
 
 		if (redisMeta.equals(getRedisMaster())) {
-			super.startRedis(dcMeta, redisMeta);
+			super.startRedis(redisMeta);
 		} else {
 			logger.info("[startRedis][do not start it]{}", redisMeta);
 		}

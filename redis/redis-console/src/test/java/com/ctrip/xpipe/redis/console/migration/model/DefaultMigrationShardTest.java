@@ -1,10 +1,13 @@
 package com.ctrip.xpipe.redis.console.migration.model;
 
 import com.ctrip.xpipe.command.AbstractCommand;
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.console.AbstractConsoleTest;
 import com.ctrip.xpipe.redis.console.migration.command.MigrationCommandBuilder;
-import com.ctrip.xpipe.redis.console.migration.command.result.ShardMigrationResult;
-import com.ctrip.xpipe.redis.console.migration.command.result.ShardMigrationResult.ShardMigrationStep;
+import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
+import com.ctrip.xpipe.redis.console.migration.model.MigrationShard;
+import com.ctrip.xpipe.redis.console.migration.model.ShardMigrationResultStatus;
+import com.ctrip.xpipe.redis.console.migration.model.ShardMigrationStep;
 import com.ctrip.xpipe.redis.console.migration.model.impl.DefaultMigrationShard;
 import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.service.RedisService;
@@ -71,11 +74,11 @@ public class DefaultMigrationShardTest extends AbstractConsoleTest {
                     }
                 });
 
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.CHECK));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.CHECK));
         migrationShard.doCheck();
         verify(mockedCommandBuilder, times(1)).buildDcCheckCommand("test-cluster", "test-shard", "dc-b", "dc-b");
-        verify(mockedMigrationService, times(1)).updateMigrationShard((MigrationShardTbl) anyObject());
-        Assert.assertTrue(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.CHECK));
+        verify(mockedMigrationService, times(1)).updateMigrationShardLogById(anyLong(), anyString());
+        Assert.assertTrue(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.CHECK));
     }
 
     @Test
@@ -98,21 +101,21 @@ public class DefaultMigrationShardTest extends AbstractConsoleTest {
                     }
                 });
 
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.CHECK));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.CHECK));
         migrationShard.doCheck();
         verify(mockedCommandBuilder, times(1)).buildDcCheckCommand("test-cluster", "test-shard", "dc-b", "dc-b");
-        verify(mockedMigrationService, times(1)).updateMigrationShard((MigrationShardTbl) anyObject());
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.CHECK));
+        verify(mockedMigrationService, times(1)).updateMigrationShardLogById(anyLong(), anyString());
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.CHECK));
     }
 
     @Test
     public void testMigrateSuccess() {
         when(mockedCommandBuilder.buildPrevPrimaryDcCommand("test-cluster", "test-shard", "dc-a"))
-                .thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
+                .thenReturn(new AbstractCommand<MetaServerConsoleService.PreviousPrimaryDcMessage>() {
                     @Override
                     protected void doExecute() throws Exception {
-                        future().setSuccess(new MetaServerConsoleService.PrimaryDcChangeMessage(
-                                MetaServerConsoleService.PRIMARY_DC_CHANGE_RESULT.SUCCESS, "Test-success"));
+                        future().setSuccess(new MetaServerConsoleService.PreviousPrimaryDcMessage(
+                                new HostPort("127.0.0.1", 0), null, "Test-Success"));
                     }
 
                     @Override
@@ -124,7 +127,7 @@ public class DefaultMigrationShardTest extends AbstractConsoleTest {
                         return "testPrevPrimaryDcSuccess";
                     }
                 });
-        when(mockedCommandBuilder.buildNewPrimaryDcCommand("test-cluster", "test-shard", "dc-b"))
+        when(mockedCommandBuilder.buildNewPrimaryDcCommand(eq("test-cluster"), eq("test-shard"), eq("dc-b"), anyObject()))
                 .thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
                     @Override
                     protected void doExecute() throws Exception {
@@ -159,26 +162,26 @@ public class DefaultMigrationShardTest extends AbstractConsoleTest {
             }
         });
 
-        Assert.assertEquals(ShardMigrationResult.ShardMigrationResultStatus.FAIL, migrationShard.getShardMigrationResult().getStatus());
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_PREVIOUS_PRIMARY_DC));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_OTHER_DC));
+        Assert.assertEquals(ShardMigrationResultStatus.FAIL, migrationShard.getShardMigrationResult().getStatus());
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_PREVIOUS_PRIMARY_DC));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_OTHER_DC));
 
         migrationShard.doMigrate();
-        verify(mockedMigrationService, times(5)).updateMigrationShard((MigrationShardTbl) anyObject());
-        Assert.assertTrue(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE));
-        Assert.assertEquals(ShardMigrationResult.ShardMigrationResultStatus.SUCCESS, migrationShard.getShardMigrationResult().getStatus());
+        verify(mockedMigrationService, times(5)).updateMigrationShardLogById(anyLong(), anyString());
+        Assert.assertTrue(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE));
+        Assert.assertEquals(ShardMigrationResultStatus.SUCCESS, migrationShard.getShardMigrationResult().getStatus());
     }
 
     @Test
     public void testMigrationFail() {
         when(mockedCommandBuilder.buildPrevPrimaryDcCommand("test-cluster", "test-shard", "dc-a"))
-                .thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
+                .thenReturn(new AbstractCommand<MetaServerConsoleService.PreviousPrimaryDcMessage>() {
                     @Override
                     protected void doExecute() throws Exception {
-                        future().setSuccess(new MetaServerConsoleService.PrimaryDcChangeMessage(
-                                MetaServerConsoleService.PRIMARY_DC_CHANGE_RESULT.SUCCESS, "Test-success"));
+                        MetaServerConsoleService.PreviousPrimaryDcMessage message = new MetaServerConsoleService.PreviousPrimaryDcMessage();
+                        future().setSuccess(message);
                     }
 
                     @Override
@@ -190,7 +193,7 @@ public class DefaultMigrationShardTest extends AbstractConsoleTest {
                         return "testPrevPrimaryDcSuccess";
                     }
                 });
-        when(mockedCommandBuilder.buildNewPrimaryDcCommand("test-cluster", "test-shard", "dc-b"))
+        when(mockedCommandBuilder.buildNewPrimaryDcCommand(eq("test-cluster"), eq("test-shard"), eq("dc-b"), anyObject()))
                 .thenReturn(new AbstractCommand<MetaServerConsoleService.PrimaryDcChangeMessage>() {
                     @Override
                     protected void doExecute() throws Exception {
@@ -225,24 +228,27 @@ public class DefaultMigrationShardTest extends AbstractConsoleTest {
             }
         });
 
-        Assert.assertEquals(ShardMigrationResult.ShardMigrationResultStatus.FAIL, migrationShard.getShardMigrationResult().getStatus());
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_PREVIOUS_PRIMARY_DC));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_OTHER_DC));
+        Assert.assertEquals(ShardMigrationResultStatus.FAIL, migrationShard.getShardMigrationResult().getStatus());
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_PREVIOUS_PRIMARY_DC));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_OTHER_DC));
 
         migrationShard.doMigrate();
-        verify(mockedMigrationService, times(3)).updateMigrationShard((MigrationShardTbl) anyObject());
-        Assert.assertTrue(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_PREVIOUS_PRIMARY_DC));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
-        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationResult.ShardMigrationStep.MIGRATE));
-        Assert.assertEquals(ShardMigrationResult.ShardMigrationResultStatus.FAIL, migrationShard.getShardMigrationResult().getStatus());
+        verify(mockedMigrationService, times(3)).updateMigrationShardLogById(anyLong(), anyString());
+        Assert.assertTrue(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_PREVIOUS_PRIMARY_DC));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
+        Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE));
+        Assert.assertEquals(ShardMigrationResultStatus.FAIL, migrationShard.getShardMigrationResult().getStatus());
     }
 
 
     private void prepareMockData() {
+
+        String clusterName = "test-cluster";
         when(mockedMigrationCluster.getCurrentCluster()).thenReturn((new ClusterTbl()).setId(1)
-                .setClusterName("test-cluster").setActivedcId(1L));
+                .setClusterName(clusterName).setActivedcId(1L));
+        when(mockedMigrationCluster.clusterName()).thenReturn(clusterName);
         when(mockedMigrationCluster.getMigrationCluster()).thenReturn((new MigrationClusterTbl()).setClusterId(1)
                 .setDestinationDcId(2L));
         when(mockedMigrationCluster.getRedisService()).thenReturn(mockedRedisService);

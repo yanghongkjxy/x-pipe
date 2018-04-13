@@ -1,22 +1,19 @@
 package com.ctrip.xpipe.redis.console.controller.consoleportal;
 
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RestController;
-
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
 import com.ctrip.xpipe.redis.console.model.MigrationClusterModel;
 import com.ctrip.xpipe.redis.console.model.MigrationEventModel;
 import com.ctrip.xpipe.redis.console.model.MigrationEventTbl;
 import com.ctrip.xpipe.redis.console.service.migration.MigrationService;
+import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterNotFoundException;
+import com.ctrip.xpipe.redis.console.util.DataModifiedTimeGenerator;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @author shyin
@@ -32,13 +29,29 @@ public class MigrationController extends AbstractConsoleController {
 	
 	@RequestMapping(value = "/migration/events", method = RequestMethod.POST)
 	public Map<String, Long> createEvent(@RequestBody MigrationEventModel event) {
+
 		Map<String, Long> res = new HashMap<>();
 		logger.info("[Create Event]{}", event);
-		res.put("value", migrationService.createMigrationEvent(event));
-		logger.info("[Create Event][Done]{}", event);
+
+		String user = userInfoHolder.getUser().getUserId();
+		String tag = generateUniqueEventTag(user);
+
+		Long migrationEventId = migrationService.createMigrationEvent(event.createMigrationRequest(user, tag));
+
+		res.put("value", migrationEventId);
+		logger.info("[Create Event][Done]{}", migrationEventId);
 		return res;
 	}
-	
+
+	private String generateUniqueEventTag(String user) {
+		StringBuilder sb = new StringBuilder();
+		sb.append(DataModifiedTimeGenerator.generateModifiedTime());
+		sb.append("-");
+		sb.append(user);
+		return sb.toString();
+	}
+
+
 	@RequestMapping(value = "/migration/events/all", method = RequestMethod.GET) 
 	public List<MigrationEventTbl> getAllEvents() {
 		return migrationService.findAll();
@@ -57,26 +70,31 @@ public class MigrationController extends AbstractConsoleController {
 	
 	@RequestMapping(value = "/migration/events/{eventId}/clusters/{clusterId}", method = RequestMethod.POST)
 	public void continueMigrationCluster(@PathVariable Long eventId, @PathVariable Long clusterId) {
+		logger.info("[continueMigrationCluster]{}, {}", eventId, clusterId);
 		migrationService.continueMigrationCluster(eventId, clusterId);
 	}
 	
 	@RequestMapping(value = "/migration/events/{eventId}/clusters/{clusterId}/cancel", method = RequestMethod.POST)
 	public void cancelMigrationCluster(@PathVariable Long eventId, @PathVariable Long clusterId) {
+		logger.info("[cancelMigrationCluster]{}, {}", eventId, clusterId);
 		migrationService.cancelMigrationCluster(eventId, clusterId);
 	}
 
-	@RequestMapping(value = "/migration/events/{eventId}/clusters/{clusterId}/rollback", method = RequestMethod.POST)
-	public void rollbackMigrationCluster(@PathVariable Long eventId, @PathVariable Long clusterId) {
+	@RequestMapping(value = "/migration/events/{eventId}/clusters/{clusterId}/tryRollback", method = RequestMethod.POST)
+	public void rollbackMigrationCluster(@PathVariable Long eventId, @PathVariable Long clusterId) throws ClusterNotFoundException {
+		logger.info("[rollbackMigrationCluster]{}, {}", eventId, clusterId);
 		migrationService.rollbackMigrationCluster(eventId, clusterId);
 	}
 	
 	@RequestMapping(value = "/migration/events/{eventId}/clusters/{clusterId}/forcePublish", method = RequestMethod.POST)
 	public void forcePublishMigrationCluster(@PathVariable Long eventId, @PathVariable Long clusterId) {
+		logger.info("[forcePublishMigrationCluster]{}, {}", eventId, clusterId);
 		migrationService.forcePublishMigrationCluster(eventId, clusterId);
 	}
 	
 	@RequestMapping(value = "/migration/events/{eventId}/clusters/{clusterId}/forceEnd", method = RequestMethod.POST)
 	public void forceEndMigrationCluster(@PathVariable Long eventId, @PathVariable Long clusterId) {
+		logger.info("[forceEndMigrationCluster]{}, {}", eventId, clusterId);
 		migrationService.forceEndMigrationClsuter(eventId, clusterId);
 	}
 	

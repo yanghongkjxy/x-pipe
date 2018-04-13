@@ -1,7 +1,5 @@
 package com.ctrip.xpipe.redis.integratedtest.keeper;
 
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
@@ -11,6 +9,7 @@ import com.ctrip.xpipe.redis.core.protocal.cmd.AbstractKeeperCommand.KeeperSetSt
 import com.ctrip.xpipe.redis.integratedtest.AbstractIntegratedTest;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.config.TestKeeperConfig;
+import com.ctrip.xpipe.tuple.Pair;
 
 /**
  * @author wenchao.meng
@@ -24,11 +23,6 @@ public abstract class AbstractKeeperIntegrated extends AbstractIntegratedTest{
 	private int replicationStoreMaxCommandsToTransferBeforeCreateRdb = 1024;
 	private int minTimeMilliToGcAfterCreate = 2000;
 	
-
-	@Override
-	protected String getRedisTemplate() {
-		return "conf/redis_raw.conf";
-	}
 
 	protected KeeperMeta getKeeperActive(RedisMeta redisMeta) {
 		

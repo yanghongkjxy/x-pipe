@@ -1,13 +1,5 @@
 package com.ctrip.xpipe.redis.meta.server.meta;
 
-import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.lifecycle.Releasable;
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
@@ -15,6 +7,13 @@ import com.ctrip.xpipe.redis.core.entity.ShardMeta;
 import com.ctrip.xpipe.redis.core.meta.MetaClone;
 import com.ctrip.xpipe.redis.core.meta.comparator.ClusterMetaComparator;
 import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
+import com.ctrip.xpipe.tuple.Pair;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author wenchao.meng
@@ -48,13 +47,13 @@ public class CurrentMetaTest extends AbstractMetaServerTest{
 		
 		Pair<String, Integer> gotMaster = currentMeta.getKeeperMaster(clusterId, shardId);
 		Assert.assertEquals(keeperMaster, gotMaster);
-		Assert.assertTrue(keeperMaster != gotMaster);;
+		Assert.assertTrue(keeperMaster != gotMaster);
 		
 		
 		keeperMaster.setKey("127.0.0.2");
 		gotMaster = currentMeta.getKeeperMaster(clusterId, shardId);
 		Assert.assertNotEquals(keeperMaster, gotMaster);
-		Assert.assertTrue(keeperMaster != gotMaster);;
+		Assert.assertTrue(keeperMaster != gotMaster);
 	}
 	
 	@Test
@@ -92,7 +91,7 @@ public class CurrentMetaTest extends AbstractMetaServerTest{
 		});
 		
 		currentMeta.removeCluster(clusterId);
-		Assert.assertEquals(1, releaseCount.get());;
+		Assert.assertEquals(1, releaseCount.get());
 		
 	}
 	
@@ -141,7 +140,7 @@ public class CurrentMetaTest extends AbstractMetaServerTest{
 		boolean result = currentMeta.setKeeperActive(clusterId, shardId, keeperMeta);
 		Assert.assertTrue(result);
 		keeperMeta.setActive(true);
-		Assert.assertEquals(keeperMeta, currentMeta.getKeeperActive(clusterId, shardId));;
+		Assert.assertEquals(keeperMeta, currentMeta.getKeeperActive(clusterId, shardId));
 		Assert.assertFalse(currentMeta.setKeeperActive(clusterId, shardId, keeperMeta));
 		
 		//set keeper active not exist
@@ -157,7 +156,7 @@ public class CurrentMetaTest extends AbstractMetaServerTest{
 		Assert.assertEquals(new Pair<String, Integer>("127.0.0.1", 6379), currentMeta.getKeeperMaster(clusterId, shardId));
 		Pair<String, Integer> keeperMaster = new Pair<String, Integer>("localhost", randomPort());
 		currentMeta.setKeeperMaster(clusterId, shardId, keeperMaster);
-		Assert.assertEquals(keeperMaster, currentMeta.getKeeperMaster(clusterId, shardId));;
+		Assert.assertEquals(keeperMaster, currentMeta.getKeeperMaster(clusterId, shardId));
 
 		
 		

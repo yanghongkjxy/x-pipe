@@ -1,8 +1,19 @@
 package com.ctrip.xpipe.redis.meta.server.keeper.manager;
 
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-
+import com.ctrip.xpipe.api.server.Server.SERVER_ROLE;
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
+import com.ctrip.xpipe.exception.ExceptionUtils;
+import com.ctrip.xpipe.lifecycle.LifecycleHelper;
+import com.ctrip.xpipe.netty.ByteBufUtils;
+import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
+import com.ctrip.xpipe.redis.core.entity.KeeperTransMeta;
+import com.ctrip.xpipe.redis.core.keeper.container.KeeperContainerService;
+import com.ctrip.xpipe.redis.core.protocal.MASTER_STATE;
+import com.ctrip.xpipe.redis.core.protocal.pojo.SlaveRole;
+import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
+import com.ctrip.xpipe.simpleserver.Server;
+import com.google.common.util.concurrent.SettableFuture;
+import com.sun.org.apache.xpath.internal.operations.Bool;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -10,17 +21,9 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.runners.MockitoJUnitRunner;
 
-import com.ctrip.xpipe.api.server.Server.SERVER_ROLE;
-import com.ctrip.xpipe.exception.ExceptionUtils;
-import com.ctrip.xpipe.lifecycle.LifecycleHelper;
-import com.ctrip.xpipe.netty.ByteBufUtils;
-import com.ctrip.xpipe.redis.core.entity.KeeperTransMeta;
-import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
-import com.ctrip.xpipe.redis.core.keeper.container.KeeperContainerService;
-import com.ctrip.xpipe.redis.core.protocal.MASTER_STATE;
-import com.ctrip.xpipe.redis.core.protocal.pojo.SlaveRole;
-import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
-import com.ctrip.xpipe.simpleserver.Server;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -40,9 +43,7 @@ public class AddKeeperCommandTest extends AbstractMetaServerTest{
 	private AddKeeperCommand addKeeperCommand;
 	
 	private int keeperPort = randomPort();
-	
-	
-	
+
 	@Before
 	public void beforeAddKeeperCommandTest(){
 		
@@ -52,6 +53,35 @@ public class AddKeeperCommandTest extends AbstractMetaServerTest{
 		
 		keeperTransMeta  = new KeeperTransMeta("clusterId", "shardId", keeperMeta);
 		addKeeperCommand = new AddKeeperCommand(keeperContainerService, keeperTransMeta, scheduled, timeoutMilli, checkInterval);
+	}
+
+	@Test
+	public void testCheckStateCommandNoDelay() throws Exception {
+
+		int sleepTime = 2000;
+		SlaveRole keeperRole = new SlaveRole(SERVER_ROLE.KEEPER, "localhost", randomPort(), MASTER_STATE.REDIS_REPL_CONNECTED, 0);
+		Server server = startServer(keeperPort, new Callable<String>() {
+			@Override
+			public String call() throws Exception {
+				sleep(sleepTime);
+				return ByteBufUtils.readToString(keeperRole.format());
+			}
+		});
+
+		SettableFuture<Boolean> objectSettableFuture = SettableFuture.create();
+
+		executors.execute(new AbstractExceptionLogTask() {
+			@Override
+			public void doRun() throws Exception {
+
+				AddKeeperCommand.CheckStateCommand checkStateCommand = new AddKeeperCommand.CheckStateCommand(new KeeperMeta().setIp("127.0.0.1").setPort(server.getPort()), scheduled);
+				checkStateCommand.doExecute();
+				objectSettableFuture.set(true);
+			}
+		});
+
+		//should return immediately
+		objectSettableFuture.get(500, TimeUnit.MILLISECONDS);
 	}
 	
 	@SuppressWarnings("unused")

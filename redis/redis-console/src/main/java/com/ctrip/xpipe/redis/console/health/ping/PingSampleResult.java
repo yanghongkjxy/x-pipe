@@ -1,9 +1,9 @@
 package com.ctrip.xpipe.redis.console.health.ping;
 
+import com.ctrip.xpipe.endpoint.HostPort;
+
 import java.util.HashMap;
 import java.util.Map;
-
-import com.ctrip.xpipe.metric.HostPort;
 
 /**
  * @author marsqing
@@ -22,7 +22,7 @@ public class PingSampleResult {
 	}
 
 	public void addPong(HostPort hostPort, InstancePingResult pingResult) {
-		slaveHostPort2Pong.put(hostPort, pingResult.isDone());
+		slaveHostPort2Pong.put(hostPort, pingResult.isSuccess());
 	}
 
 	public String getClusterId() {

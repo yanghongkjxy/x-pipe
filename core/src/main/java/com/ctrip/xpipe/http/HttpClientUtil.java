@@ -2,7 +2,6 @@ package com.ctrip.xpipe.http;
 
 import java.io.IOException;
 
-import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -41,7 +40,7 @@ public class HttpClientUtil {
         return httpclient;
 	}
 	
-	public String getResultAsString(String address) throws ClientProtocolException, IOException{
+	public String getResultAsString(String address) throws IOException{
 		
 		HttpGet get = new HttpGet(address);
 		CloseableHttpResponse response = null;

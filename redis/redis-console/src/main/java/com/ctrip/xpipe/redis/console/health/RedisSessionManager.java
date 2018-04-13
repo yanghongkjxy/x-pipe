@@ -8,5 +8,4 @@ package com.ctrip.xpipe.redis.console.health;
 public interface RedisSessionManager {
 
 	RedisSession findOrCreateSession(String host, int port);
-
 }

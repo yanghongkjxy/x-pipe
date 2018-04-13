@@ -1,16 +1,16 @@
 package com.ctrip.xpipe.redis.meta.server.cluster.impl;
 
-import java.io.IOException;
-
+import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
+import com.ctrip.xpipe.redis.meta.server.cluster.ClusterServer;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import static org.mockito.Mockito.*;
 import org.mockito.runners.MockitoJUnitRunner;
 
-import com.ctrip.xpipe.redis.meta.server.AbstractMetaServerTest;
-import com.ctrip.xpipe.redis.meta.server.cluster.ClusterServer;
+import java.io.IOException;
+
+import static org.mockito.Mockito.*;
 
 /**
  * @author wenchao.meng
@@ -38,6 +38,7 @@ public class ArrangeTaskTriggerTest extends AbstractMetaServerTest{
 		add(arrangeTaskTrigger);
 		
 		arrangeTaskTrigger.setArrangeTaskExecutor(arrangeTaskExecutor);
+		arrangeTaskTrigger.setScheduled(scheduled);
 		
 	}
 	
@@ -48,7 +49,7 @@ public class ArrangeTaskTriggerTest extends AbstractMetaServerTest{
 		
 		arrangeTaskTrigger.setWaitForRestartTimeMills(timeout);
 		
-		verify(arrangeTaskExecutor, times(0)).offer(any());;
+		verify(arrangeTaskExecutor, times(0)).offer(any());
 		
 		arrangeTaskTrigger.serverDead(clusterServer);
 		
@@ -58,13 +59,13 @@ public class ArrangeTaskTriggerTest extends AbstractMetaServerTest{
 
 		sleep(timeout * 2);
 
-		verify(arrangeTaskExecutor, times(0)).offer(any());;
+		verify(arrangeTaskExecutor, times(0)).offer(any());
 
 		
 		arrangeTaskTrigger.serverDead(clusterServer);
 		sleep(timeout * 2);
 
-		verify(arrangeTaskExecutor, times(1)).offer(any());;
+		verify(arrangeTaskExecutor, times(1)).offer(any());
 
 	}
 	

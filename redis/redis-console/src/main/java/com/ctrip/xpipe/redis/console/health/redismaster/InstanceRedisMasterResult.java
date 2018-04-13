@@ -12,13 +12,18 @@ public class InstanceRedisMasterResult extends BaseInstanceResult<String>{
 
 
     @Override
-    public void done(long rcvNanoTime, String role) {
-        super.done(rcvNanoTime, role);
+    public void success(long rcvNanoTime, String role) {
+        super.success(rcvNanoTime, role);
     }
 
     public boolean roleIsMaster(){
 
-        return Server.SERVER_ROLE.MASTER.toString().equalsIgnoreCase(context);
+        return Server.SERVER_ROLE.MASTER.sameRole(context);
+    }
+
+    public boolean roleIsSlave(){
+
+        return Server.SERVER_ROLE.SLAVE.sameRole(context);
     }
 
 

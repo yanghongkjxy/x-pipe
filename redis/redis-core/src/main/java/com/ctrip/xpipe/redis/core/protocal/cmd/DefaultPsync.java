@@ -1,14 +1,14 @@
 package com.ctrip.xpipe.redis.core.protocal.cmd;
 
-import java.io.IOException;
-import java.util.concurrent.ScheduledExecutorService;
-
 import com.ctrip.xpipe.api.endpoint.Endpoint;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.exception.XpipeRuntimeException;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.redis.core.store.ReplicationStore;
 import com.ctrip.xpipe.redis.core.store.ReplicationStoreManager;
+
+import java.io.IOException;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
@@ -31,7 +31,7 @@ public class DefaultPsync extends AbstractReplicationStorePsync{
 	}
 	
 	@Override		
-	protected ReplicationStore getCurrentReplicationStore() {
+	protected final ReplicationStore getCurrentReplicationStore() {
 		
 		try {
 			return replicationStoreManager.createIfNotExist();
@@ -61,10 +61,10 @@ public class DefaultPsync extends AbstractReplicationStorePsync{
 			notifyReFullSync();
 		}
 		logger.info("[doWhenFullSyncToNonFreshReplicationStore][set keepermeta]{}", replId);
-		currentReplicationStore = createReplicationStore(replId);
+		currentReplicationStore = createReplicationStore();
 	}
 	
-	private ReplicationStore createReplicationStore(String replId) {
+	private ReplicationStore createReplicationStore() {
 		
 		try {
 			return replicationStoreManager.create();

@@ -1,8 +1,8 @@
 package com.ctrip.xpipe.redis.console.util;
 
-import java.util.List;
-
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService;
+
+import java.util.List;
 
 /**
  * @author shyin
@@ -10,6 +10,7 @@ import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService;
  * Sep 9, 2016
  */
 public interface MetaServerConsoleServiceManagerWrapper {
-	public List<MetaServerConsoleService> get(List<String> dcNames);
-	public MetaServerConsoleService get(String dcName);
+
+	List<MetaServerConsoleService> get(List<String> dcNames);
+	MetaServerConsoleService get(String dcName);
 }

@@ -1,21 +1,24 @@
 package com.ctrip.xpipe.redis.console.health.action;
 
 import com.ctrip.xpipe.api.factory.ObjectFactory;
-import com.ctrip.xpipe.api.monitor.EventMonitor;
 import com.ctrip.xpipe.api.observer.Observable;
 import com.ctrip.xpipe.api.observer.Observer;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
-import com.ctrip.xpipe.metric.HostPort;
+import com.ctrip.xpipe.concurrent.DefaultExecutorFactory;
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
+import com.ctrip.xpipe.redis.console.health.HealthChecker;
 import com.ctrip.xpipe.redis.console.health.delay.DelayCollector;
 import com.ctrip.xpipe.redis.console.health.delay.DelaySampleResult;
 import com.ctrip.xpipe.redis.console.health.ping.PingCollector;
 import com.ctrip.xpipe.redis.console.health.ping.PingSampleResult;
 import com.ctrip.xpipe.utils.MapUtils;
+import com.ctrip.xpipe.utils.StringUtil;
 import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -30,21 +33,19 @@ import java.util.concurrent.*;
  *         May 04, 2017
  */
 @Component
+@ConditionalOnProperty(name = { HealthChecker.ENABLED }, matchIfMissing = true)
 public class AllMonitorCollector implements PingCollector, DelayCollector{
 
     protected Logger logger = LoggerFactory.getLogger(getClass());
 
     private final int  THREAD_COUNT = 4;
-
-    private int healthyDelayMilli = 5000;
-
-    private int downAfterCheckNums = 5;
+    private final int  CORE_POOL_MONITOR_PROCESS = 100;
 
     private Map<HostPort, HealthStatus> allHealthStatus = new ConcurrentHashMap<>();
 
-    private ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(THREAD_COUNT, XpipeThreadFactory.create("ALL_MONITOR_CHECK"));
+    private ScheduledExecutorService scheduled;
 
-    private ExecutorService executors = Executors.newCachedThreadPool(XpipeThreadFactory.create("ALL_MONITOR_PRO"));
+    private ExecutorService executors;
 
     @Autowired
     private ConsoleConfig consoleConfig;
@@ -54,14 +55,19 @@ public class AllMonitorCollector implements PingCollector, DelayCollector{
 
     @PostConstruct
     public void postConstruct(){
+        scheduled = Executors.newScheduledThreadPool(THREAD_COUNT, XpipeThreadFactory.create("ALL_MONITOR_CHECK"));
+        executors = DefaultExecutorFactory.createAllowCoreTimeoutAbortPolicy("ALL_MONITOR_PRO", CORE_POOL_MONITOR_PROCESS).createExecutorService();
 
     }
 
-    public int getState(HostPort hostPort){
+    public HEALTH_STATE getState(HostPort hostPort){
 
+        if(hostPort == null || StringUtil.isEmpty(hostPort.getHost())) {
+            return HEALTH_STATE.UNKNOWN;
+        }
         HealthStatus healthStatus = allHealthStatus.get(hostPort);
         if(healthStatus == null){
-            return HealthStatus.REDIS_UNKNOWN_STATE;
+            return HEALTH_STATE.UNKNOWN;
         }
         return healthStatus.getState();
     }
@@ -70,6 +76,7 @@ public class AllMonitorCollector implements PingCollector, DelayCollector{
     @PreDestroy
     public void preDestroy(){
         scheduled.shutdownNow();
+        executors.shutdownNow();
     }
 
 
@@ -91,8 +98,12 @@ public class AllMonitorCollector implements PingCollector, DelayCollector{
             @Override
             public HealthStatus create() {
 
-                HealthStatus healthStatus = new HealthStatus(key, downAfterCheckNums * consoleConfig.getRedisReplicationHealthCheckInterval(),
-                        healthyDelayMilli, scheduled);
+                HealthStatus healthStatus = new HealthStatus(
+                        key,
+                        () -> consoleConfig.getDownAfterCheckNums() * consoleConfig.getRedisReplicationHealthCheckInterval(),
+                        () -> consoleConfig.getHealthyDelayMilli(),
+                        scheduled);
+
                 healthStatus.addObserver(new Observer() {
                     @Override
                     public void update(Object args, Observable observable) {
@@ -106,10 +117,11 @@ public class AllMonitorCollector implements PingCollector, DelayCollector{
 
     @Override
     public void collect(DelaySampleResult result) {
-
-        HealthStatus healthStatus = createOrGet(result.getMasterHostPort());
-        healthStatus.delay(TimeUnit.NANOSECONDS.toMillis(result.getMasterDelayNanos()));
-
+        HealthStatus healthStatus;
+        if(result.getMasterHostPort() != null) {
+            healthStatus = createOrGet(result.getMasterHostPort());
+            healthStatus.delay(TimeUnit.NANOSECONDS.toMillis(result.getMasterDelayNanos()));
+        }
         for (Map.Entry<HostPort, Long> entry : result.getSlaveHostPort2Delay().entrySet()) {
 
             healthStatus = createOrGet(entry.getKey());

@@ -1,13 +1,13 @@
 package com.ctrip.xpipe.redis.core.protocal.protocal;
 
-import java.io.IOException;
-
+import com.ctrip.xpipe.netty.ByteBufUtils;
+import com.ctrip.xpipe.payload.ByteArrayOutputStreamPayload;
+import com.ctrip.xpipe.payload.ByteArrayWritableByteChannel;
+import io.netty.buffer.ByteBuf;
 import org.junit.Assert;
 import org.junit.Test;
 
-import com.ctrip.xpipe.payload.ByteArrayOutputStreamPayload;
-import com.ctrip.xpipe.payload.ByteArrayWritableByteChannel;
-import com.ctrip.xpipe.redis.core.protocal.protocal.ArrayParser;
+import java.io.IOException;
 
 
 /**
@@ -47,7 +47,18 @@ public class ArrayParserTest extends AbstractRedisProtocolTest{
 		Assert.assertEquals(str2, new String(channel.getResult()));
 		
 		Assert.assertEquals(long3, result[2]);
-		
 	}
+
+	@Test
+	public void testFormat(){
+
+		ArrayParser arrayParser = new ArrayParser(new Object[]{1, "123"});
+		ByteBuf format = arrayParser.format();
+
+		String str = ByteBufUtils.readToString(format);
+		Assert.assertEquals("*2\r\n:1\r\n+123\r\n", str);
+	}
+
+
 
 }

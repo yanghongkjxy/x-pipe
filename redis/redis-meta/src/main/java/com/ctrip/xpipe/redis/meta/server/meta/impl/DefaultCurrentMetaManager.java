@@ -1,17 +1,5 @@
 package com.ctrip.xpipe.redis.meta.server.meta.impl;
 
-
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.*;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.lifecycle.Releasable;
 import com.ctrip.xpipe.api.observer.Observable;
 import com.ctrip.xpipe.api.observer.Observer;
@@ -32,8 +20,18 @@ import com.ctrip.xpipe.redis.meta.server.cluster.SlotManager;
 import com.ctrip.xpipe.redis.meta.server.meta.CurrentMeta;
 import com.ctrip.xpipe.redis.meta.server.meta.CurrentMetaManager;
 import com.ctrip.xpipe.redis.meta.server.meta.DcMetaCache;
+import com.ctrip.xpipe.spring.AbstractSpringConfigContext;
+import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.IpUtils;
-import com.ctrip.xpipe.utils.XpipeThreadFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import javax.annotation.Resource;
+import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author wenchao.meng
@@ -54,18 +52,21 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 	@Autowired
 	private DcMetaCache dcMetaCache;
 	
-	private CurrentMeta currentMeta = new CurrentMeta();;
+	private CurrentMeta currentMeta = new CurrentMeta();
 	
 	private Set<Integer>   currentSlots = new HashSet<>();
-	
+
+	@Resource(name = AbstractSpringConfigContext.SCHEDULED_EXECUTOR)
 	private ScheduledExecutorService scheduled;
+
 	private ScheduledFuture<?> 		slotCheckFuture;
 	
 	@Autowired
 	private List<MetaServerStateChangeHandler> stateHandlers;
 
-	private ExecutorService executors;
-	
+	@Resource(name = AbstractSpringConfigContext.GLOBAL_EXECUTOR)
+	private Executor executors;
+
 	public DefaultCurrentMetaManager() {
 	}
 	
@@ -73,12 +74,10 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 	protected void doInitialize() throws Exception {
 		super.doInitialize();
 
-		executors = Executors.newCachedThreadPool();
 		setExecutors(executors);
 
 		logger.info("[doInitialize]{}, {}", stateHandlers, currentClusterServer.getServerId());
 		dcMetaCache.addObserver(this);
-		scheduled = Executors.newScheduledThreadPool(2, XpipeThreadFactory.create(String.format("CURRENT_META_MANAGER(%d)", currentClusterServer.getServerId())));
 	}
 	
 	@Override
@@ -153,8 +152,6 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 	@Override
 	protected void doDispose() throws Exception {
 
-		executors.shutdownNow();
-		scheduled.shutdownNow();
 		currentMeta.release();
 		super.doDispose();
 	}

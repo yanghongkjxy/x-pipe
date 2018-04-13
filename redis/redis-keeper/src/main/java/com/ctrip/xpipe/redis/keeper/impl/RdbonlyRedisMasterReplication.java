@@ -1,8 +1,5 @@
 package com.ctrip.xpipe.redis.keeper.impl;
 
-import java.io.IOException;
-import java.util.concurrent.ScheduledExecutorService;
-
 import com.ctrip.xpipe.api.server.PARTIAL_STATE;
 import com.ctrip.xpipe.redis.core.protocal.Psync;
 import com.ctrip.xpipe.redis.core.protocal.cmd.RdbOnlyPsync;
@@ -12,10 +9,13 @@ import com.ctrip.xpipe.redis.keeper.RdbDumper;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisMaster;
 import com.ctrip.xpipe.redis.keeper.store.RdbOnlyReplicationStore;
-
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.nio.NioEventLoopGroup;
+
+import java.io.IOException;
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
@@ -27,8 +27,8 @@ public class RdbonlyRedisMasterReplication extends AbstractRedisMasterReplicatio
 	private RdbOnlyReplicationStore rdbOnlyReplicationStore;
 	private DumpedRdbStore dumpedRdbStore;
 	
-	public RdbonlyRedisMasterReplication(RedisKeeperServer redisKeeperServer, RedisMaster redisMaster, ScheduledExecutorService scheduled, RdbDumper rdbDumper) {
-		super(redisKeeperServer, redisMaster, scheduled);
+	public RdbonlyRedisMasterReplication(RedisKeeperServer redisKeeperServer, RedisMaster redisMaster, NioEventLoopGroup nioEventLoopGroup, ScheduledExecutorService scheduled, RdbDumper rdbDumper) {
+		super(redisKeeperServer, redisMaster, nioEventLoopGroup, scheduled);
 		setRdbDumper(rdbDumper);
 	}
 	

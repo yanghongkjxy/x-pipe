@@ -1,12 +1,11 @@
 package com.ctrip.xpipe.redis.meta.server.cluster;
 
+import com.ctrip.xpipe.redis.meta.server.TestMetaServer;
+import com.ctrip.xpipe.redis.meta.server.cluster.impl.ArrangeTaskExecutor;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.springframework.context.ApplicationContext;
-
-import com.ctrip.xpipe.redis.meta.server.TestMetaServer;
-import com.ctrip.xpipe.redis.meta.server.cluster.impl.ArrangeTaskExecutor;
 
 /**
  * @author wenchao.meng
@@ -59,7 +58,7 @@ public class ClusterServerShardingTest extends AbstractMetaServerClusterTest{
 		SlotManager slotManager = leader.getContext().getBean(SlotManager.class);
 		slotManager.refresh();
 		
-		Assert.assertEquals(serverCount - 1, slotManager.allServers().size());;
+		Assert.assertEquals(serverCount - 1, slotManager.allServers().size());
 		AssertBalance(slotManager);
 	}
 
@@ -115,7 +114,7 @@ public class ClusterServerShardingTest extends AbstractMetaServerClusterTest{
 		
 		SlotManager slotManager = newLeader.getContext().getBean(SlotManager.class);
 		slotManager.refresh();
-		Assert.assertEquals(serverCount - 1, slotManager.allServers().size());;
+		Assert.assertEquals(serverCount - 1, slotManager.allServers().size());
 		AssertBalance(slotManager);
 	}
 

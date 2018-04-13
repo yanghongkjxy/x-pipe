@@ -1,12 +1,8 @@
 package com.ctrip.xpipe.redis.core.console;
 
-import java.util.Set;
+import com.ctrip.xpipe.redis.core.entity.*;
 
-import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
-import com.ctrip.xpipe.redis.core.entity.DcMeta;
-import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
-import com.ctrip.xpipe.redis.core.entity.RedisMeta;
-import com.ctrip.xpipe.redis.core.entity.ShardMeta;
+import java.util.Set;
 
 /**
  * all api for console
@@ -30,8 +26,8 @@ public interface ConsoleService {
 	ShardMeta getShardMeta(String dcId, String clusterId, String shardId);
 
 	/***********************POST***********************/
-	void keeperActiveChanged(String dc, String clusterId, String shardId, KeeperMeta newActiveKeeper) throws Exception;
+	void keeperActiveChanged(String dc, String clusterId, String shardId, KeeperMeta newActiveKeeper);
 	
-	void redisMasterChanged(String dc, String clusterId, String shardId, RedisMeta newRedisMaster) throws Exception;
+	void redisMasterChanged(String dc, String clusterId, String shardId, RedisMeta newRedisMaster);
 	
 }

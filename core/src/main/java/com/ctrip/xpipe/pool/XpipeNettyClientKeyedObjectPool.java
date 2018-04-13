@@ -2,6 +2,7 @@ package com.ctrip.xpipe.pool;
 
 import java.net.InetSocketAddress;
 
+import com.ctrip.xpipe.api.pool.ObjectPoolException;
 import org.apache.commons.pool2.KeyedObjectPool;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPool;
 import org.apache.commons.pool2.impl.GenericKeyedObjectPoolConfig;
@@ -23,6 +24,11 @@ import com.ctrip.xpipe.netty.commands.NettyKeyedPoolClientFactory;
  */
 public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
 		implements TopElement, SimpleKeyedObjectPool<InetSocketAddress, NettyClient> {
+
+	public static final long DEFAULT_SOFT_MIN_EVICTABLE_IDLE_TIME_MILLIS = 30000;
+	public static final long DEFAULT_MIN_EVICTABLE_IDLE_TIME_MILLIS = 1000L * 60L * 30L;
+	public static final long DEFAULT_TIME_BETWEEN_EVICTION_RUNS_MILLIS = 5000L;
+
 
 	private KeyedObjectPool<InetSocketAddress, NettyClient> objectPool;
 	private NettyKeyedPoolClientFactory pooledObjectFactory;
@@ -58,9 +64,28 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
 				pooledObjectFactory, config);
 		genericKeyedObjectPool.setTestOnBorrow(true);
 		genericKeyedObjectPool.setTestOnCreate(true);
+		genericKeyedObjectPool.setSoftMinEvictableIdleTimeMillis(DEFAULT_SOFT_MIN_EVICTABLE_IDLE_TIME_MILLIS);
+		genericKeyedObjectPool.setMinEvictableIdleTimeMillis(DEFAULT_MIN_EVICTABLE_IDLE_TIME_MILLIS);
+		genericKeyedObjectPool.setTimeBetweenEvictionRunsMillis(DEFAULT_TIME_BETWEEN_EVICTION_RUNS_MILLIS);
 		this.objectPool = genericKeyedObjectPool;
 	}
-	
+
+	public final void setKeyPooConfig(int minIdlePerKey, long softMinEvictableIdleTimeMillis, long minEvictableIdleTimeMillis, long timeBetweenEvictionRunsMillis) {
+
+		if(objectPool instanceof GenericKeyedObjectPool){
+			logger.info("[setKeyPooConfig]{}, {}, {}, {}", minIdlePerKey, softMinEvictableIdleTimeMillis, minEvictableIdleTimeMillis, timeBetweenEvictionRunsMillis);
+			GenericKeyedObjectPool genericKeyedObjectPool = (GenericKeyedObjectPool) objectPool;
+			genericKeyedObjectPool.setMinIdlePerKey(minIdlePerKey);
+			genericKeyedObjectPool.setSoftMinEvictableIdleTimeMillis(softMinEvictableIdleTimeMillis);
+			genericKeyedObjectPool.setMinEvictableIdleTimeMillis(minEvictableIdleTimeMillis);
+			genericKeyedObjectPool.setTimeBetweenEvictionRunsMillis(timeBetweenEvictionRunsMillis);
+		}else {
+			logger.warn("[setKeyPooConfig][not generickeyedobjectpool]");
+		}
+	}
+
+
+
 	@Override
 	public SimpleObjectPool<NettyClient> getKeyPool(InetSocketAddress key){
 		return new XpipeObjectPoolFromKeyed<InetSocketAddress, NettyClient>(this, key);
@@ -101,13 +126,21 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
 	}
 
 	@Override
-	public void clear() throws Exception {
-		this.objectPool.clear();
+	public void clear() throws ObjectPoolException {
+		try {
+			this.objectPool.clear();
+		} catch (Exception e) {
+			throw new ObjectPoolException("clear " + objectPool, e);
+		}
 	}
 
 	@Override
-	public void clear(InetSocketAddress key) throws Exception {
-		this.objectPool.clear(key);
+	public void clear(InetSocketAddress key) throws ObjectPoolException {
+		try {
+			this.objectPool.clear(key);
+		} catch (Exception e) {
+			throw new ObjectPoolException("object pool:" + objectPool + ",key:" + key, e);
+		}
 	}
 
 	@Override

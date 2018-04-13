@@ -1,12 +1,6 @@
 package com.ctrip.xpipe.redis.meta.server.cluster.manul;
 
 
-import java.io.IOException;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.springframework.web.client.HttpServerErrorException;
-
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.entity.ShardMeta;
@@ -18,6 +12,11 @@ import com.ctrip.xpipe.redis.core.metaserver.impl.DefaultMetaServerConsoleServic
 import com.ctrip.xpipe.redis.core.metaserver.impl.DefaultMetaServerMultiDcServiceManager;
 import com.ctrip.xpipe.redis.meta.server.TestMetaServer;
 import com.ctrip.xpipe.redis.meta.server.cluster.AbstractMetaServerClusterTest;
+import org.junit.Before;
+import org.junit.Test;
+import org.springframework.web.client.HttpServerErrorException;
+
+import java.io.IOException;
 
 /**
  * @author wenchao.meng
@@ -79,7 +78,7 @@ public class MetaInfoChange extends AbstractMetaServerClusterTest{
 	public void testRemoveCluster() throws IOException{
 		
 		try{
-			metaServerConsoleService.clusterDeleted(clusterId);;
+			metaServerConsoleService.clusterDeleted(clusterId);
 		}catch(Exception e){
 			logger.error("[testRemoveCluster]", e);
 		}
@@ -98,7 +97,7 @@ public class MetaInfoChange extends AbstractMetaServerClusterTest{
 			
 			clusterMeta.removeShard(shardId);
 			clusterMeta.addShard(shardMeta);
-			metaServerConsoleService.clusterModified(clusterMeta.getId(), clusterMeta);;
+			metaServerConsoleService.clusterModified(clusterMeta.getId(), clusterMeta);
 		}catch(Exception e){
 			logger.error("[testChangeClusterKeeper]", e);
 		}
@@ -114,7 +113,7 @@ public class MetaInfoChange extends AbstractMetaServerClusterTest{
 		try{
 			ClusterMeta clusterMeta = getCluster(dc, clusterId);
 			changeClusterKeeper(clusterMeta);
-			metaServerConsoleService.clusterModified(clusterMeta.getId(), clusterMeta);;
+			metaServerConsoleService.clusterModified(clusterMeta.getId(), clusterMeta);
 		}catch(Exception e){
 			logger.error("[testChangeClusterKeeper]", e);
 		}

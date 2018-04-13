@@ -1,22 +1,7 @@
 package com.ctrip.xpipe.redis.meta.server.keeper.manager;
 
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
-import org.springframework.web.client.ResourceAccessException;
-
 import com.ctrip.xpipe.api.lifecycle.TopElement;
-import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
-import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
-import com.ctrip.xpipe.redis.core.entity.KeeperTransMeta;
-import com.ctrip.xpipe.redis.core.entity.Redis;
-import com.ctrip.xpipe.redis.core.entity.ShardMeta;
+import com.ctrip.xpipe.redis.core.entity.*;
 import com.ctrip.xpipe.redis.core.meta.MetaComparator;
 import com.ctrip.xpipe.redis.core.meta.MetaComparatorVisitor;
 import com.ctrip.xpipe.redis.core.meta.comparator.ClusterMetaComparator;
@@ -24,8 +9,18 @@ import com.ctrip.xpipe.redis.core.meta.comparator.ShardMetaComparator;
 import com.ctrip.xpipe.redis.meta.server.keeper.KeeperManager;
 import com.ctrip.xpipe.redis.meta.server.keeper.KeeperStateController;
 import com.ctrip.xpipe.redis.meta.server.keeper.impl.AbstractCurrentMetaObserver;
+import com.ctrip.xpipe.spring.AbstractSpringConfigContext;
 import com.ctrip.xpipe.utils.ObjectUtils;
-import com.ctrip.xpipe.utils.XpipeThreadFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
+
+import javax.annotation.Resource;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author wenchao.meng
@@ -41,17 +36,10 @@ public class DefaultKeeperManager extends AbstractCurrentMetaObserver implements
 	@Autowired
 	private KeeperStateController keeperStateController;
 
+	@Resource(name = AbstractSpringConfigContext.SCHEDULED_EXECUTOR)
 	private ScheduledExecutorService scheduled;
 
 	private ScheduledFuture<?> deadCheckFuture;
-
-	@Override
-	protected void doInitialize() throws Exception {
-		super.doInitialize();
-
-		scheduled = Executors.newScheduledThreadPool(2,
-				XpipeThreadFactory.create(String.format("KEEPER_MANAGER(%d)", currentClusterServer.getServerId())));
-	}
 
 	@Override
 	protected void doStart() throws Exception {
@@ -67,13 +55,6 @@ public class DefaultKeeperManager extends AbstractCurrentMetaObserver implements
 		super.doStop();
 		deadCheckFuture.cancel(true);
 
-	}
-
-	@Override
-	protected void doDispose() throws Exception {
-
-		scheduled.shutdownNow();
-		super.doDispose();
 	}
 
 	@Override

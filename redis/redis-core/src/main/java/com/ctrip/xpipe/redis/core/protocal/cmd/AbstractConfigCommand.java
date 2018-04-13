@@ -1,9 +1,9 @@
 package com.ctrip.xpipe.redis.core.protocal.cmd;
 
-import java.util.concurrent.ScheduledExecutorService;
-
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.netty.commands.NettyClient;
+
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
@@ -23,7 +23,10 @@ public abstract class AbstractConfigCommand<T> extends AbstractRedisCommand<T>{
 		MIN_SLAVES_TO_WRITE("min-slaves-to-write"),
 		REWRITE("rewrite"),
 		DISKLESS_SYNC("repl-diskless-sync"),
-		DISKLESS_SYNC_DELAY("repl-diskless-sync-delay")
+		DISKLESS_SYNC_DELAY("repl-diskless-sync-delay"),
+		SLAVE_READONLY("slave-read-only"),
+
+		SLAVE_REPL_ALL("slave-repl-all")//extend for xredis
 		;
 		
 		private String configName;

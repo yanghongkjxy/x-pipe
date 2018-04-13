@@ -1,10 +1,10 @@
 package com.ctrip.xpipe.redis.meta.server.cluster;
 
-import java.util.Map;
-import java.util.Set;
-
 import com.ctrip.xpipe.api.lifecycle.Lifecycle;
 import com.ctrip.xpipe.api.observer.Observable;
+
+import java.util.Map;
+import java.util.Set;
 
 /**
  * @author wenchao.meng
@@ -19,7 +19,7 @@ public interface ClusterServers<T extends ClusterServer> extends Observable, Lif
 	
 	Set<T> allClusterServers();
 	
-	void refresh() throws Exception;
+	void refresh() throws ClusterException;
 	
 	boolean exist(int serverId);
 

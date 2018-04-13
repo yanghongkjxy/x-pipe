@@ -1,18 +1,5 @@
 package com.ctrip.xpipe.redis.meta.server.meta;
 
-import java.io.Serializable;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.unidal.tuple.Pair;
-
 import com.ctrip.xpipe.api.factory.ObjectFactory;
 import com.ctrip.xpipe.api.lifecycle.Releasable;
 import com.ctrip.xpipe.codec.JsonCodec;
@@ -26,9 +13,17 @@ import com.ctrip.xpipe.redis.core.meta.MetaComparatorVisitor;
 import com.ctrip.xpipe.redis.core.meta.MetaUtils;
 import com.ctrip.xpipe.redis.core.meta.comparator.ClusterMetaComparator;
 import com.ctrip.xpipe.redis.core.meta.comparator.ShardMetaComparator;
+import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.MapUtils;
 import com.ctrip.xpipe.utils.ObjectUtils;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.Serializable;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author wenchao.meng
@@ -136,6 +131,7 @@ public class CurrentMeta implements Releasable {
 
 					@Override
 					public CurrentClusterMeta create() {
+						logger.info("[addCluster][create]{}", clusterMeta.getId());
 						return new CurrentClusterMeta(clusterMeta.getId());
 					}
 				});
@@ -168,13 +164,11 @@ public class CurrentMeta implements Releasable {
 			@Override
 			public void visitRemoved(ShardMeta removed) {
 				currentClusterMeta.removeShard(removed);
-				;
 			}
 
 			@Override
 			public void visitModified(@SuppressWarnings("rawtypes") MetaComparator comparator) {
 				currentClusterMeta.changeShard((ShardMetaComparator) comparator);
-				;
 			}
 
 			@Override
@@ -220,6 +214,8 @@ public class CurrentMeta implements Releasable {
 					new ObjectFactory<CurrentShardMeta>() {
 						@Override
 						public CurrentShardMeta create() {
+
+							logger.info("[addShard][create]{} , {}", clusterId, shardMeta.getId());
 							return new CurrentShardMeta(clusterId, shardMeta.getId());
 						}
 					});

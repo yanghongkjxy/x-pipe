@@ -1,8 +1,6 @@
 package com.ctrip.xpipe.redis.console.dal;
 
-import java.sql.Connection;
-import java.sql.SQLException;
-
+import com.dianping.cat.Cat;
 import org.codehaus.plexus.logging.LogEnabled;
 import org.codehaus.plexus.logging.Logger;
 import org.unidal.dal.jdbc.DalRuntimeException;
@@ -12,18 +10,18 @@ import org.unidal.dal.jdbc.engine.QueryContext;
 import org.unidal.dal.jdbc.mapping.TableProvider;
 import org.unidal.dal.jdbc.mapping.TableProviderManager;
 import org.unidal.dal.jdbc.transaction.TransactionManager;
-
 import org.unidal.lookup.annotation.Inject;
 import org.unidal.lookup.annotation.Named;
 
-import com.dianping.cat.Cat;
+import java.sql.Connection;
+import java.sql.SQLException;
 
 /**
  * @author shyin
  *
  * Aug 26, 2016
  */
-@Named(type = TransactionManager.class)
+@Named(type = TransactionManager.class, value="xpipe")
 public class XpipeDalTransactionManager implements TransactionManager, LogEnabled {
 	   public static int INITIAL_STATUS = 0;
 	   public static int PARENT_TRANSACTION = 1;
@@ -46,9 +44,7 @@ public class XpipeDalTransactionManager implements TransactionManager, LogEnable
 	   public void closeConnection() {
 	      TransactionInfo trxInfo = m_threadLocalData.get();
 
-	      if (trxInfo.isInTransaction()) {
-	         // do nothing when in transaction
-	      } else {
+	      if (!trxInfo.isInTransaction()) {
 	         try {
 	            trxInfo.reset();
 	         } catch (SQLException e) {
@@ -63,6 +59,7 @@ public class XpipeDalTransactionManager implements TransactionManager, LogEnable
 	            connection.close();
 	         } catch (SQLException e) {
 	            // ignore it
+				 m_logger.warn("Error when closing Connection, message: " + e, e);
 	         }
 	      }
 	   }
@@ -90,7 +87,7 @@ public class XpipeDalTransactionManager implements TransactionManager, LogEnable
 	 	         try {
 	 	            trxInfo.reset();
 	 	         } catch (SQLException e) {
-	 	            e.printStackTrace();
+					 m_logger.warn("Error when commitTransaction, message: " + e, e);
 	 	         }
 	 	      }
 	      } else {
@@ -177,10 +174,10 @@ public class XpipeDalTransactionManager implements TransactionManager, LogEnable
 	      TransactionInfo trxInfo = m_threadLocalData.get();
 
 	      if (!trxInfo.isInTransaction()) {
-	         throw new DalRuntimeException("There is no active transaction open, can't rollback");
+	         throw new DalRuntimeException("There is no active transaction open, can't tryRollback");
 	      }
 	      if(trxInfo.getRecursiveLayer() <= INITIAL_STATUS) {
-	    	  throw new DalRuntimeException("Invalid transaction rollback");
+	    	  throw new DalRuntimeException("Invalid transaction tryRollback");
 	      }
 
 	      if(PARENT_TRANSACTION == trxInfo.getRecursiveLayer()) {
@@ -189,7 +186,7 @@ public class XpipeDalTransactionManager implements TransactionManager, LogEnable
 	 	            trxInfo.getConnection().rollback();
 	 	         }
 	 	      } catch (SQLException e) {
-	 	         throw new DalRuntimeException("Unable to rollback transaction, message: " + e, e);
+	 	         throw new DalRuntimeException("Unable to tryRollback transaction, message: " + e, e);
 	 	      } finally {
 	 	         try {
 	 	            trxInfo.reset();

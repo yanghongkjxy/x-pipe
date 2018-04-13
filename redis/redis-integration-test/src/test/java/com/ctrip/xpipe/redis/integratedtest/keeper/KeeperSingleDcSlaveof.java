@@ -1,16 +1,15 @@
 package com.ctrip.xpipe.redis.integratedtest.keeper;
 
-import java.util.Set;
-
-import org.junit.Assert;
-import org.junit.Test;
-
 import com.ctrip.xpipe.api.server.PARTIAL_STATE;
 import com.ctrip.xpipe.redis.core.meta.KeeperState;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisSlave;
 import com.ctrip.xpipe.redis.meta.server.job.SlaveofJob;
 import com.ctrip.xpipe.redis.meta.server.job.XSlaveofJob;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.util.Set;
 
 /**
  * @author wenchao.meng
@@ -42,7 +41,7 @@ public class KeeperSingleDcSlaveof extends AbstractKeeperIntegratedSingleDc {
 		Assert.assertEquals(0, currentSlaves.size());
 
 		logger.info(remarkableMessage("make slave slaves slaveof backup keeper"));
-		new XSlaveofJob(slaves, backupKeeper.getIp(), backupKeeper.getPort(), getXpipeNettyClientKeyedObjectPool(), scheduled).execute();
+		new XSlaveofJob(slaves, backupKeeper.getIp(), backupKeeper.getPort(), getXpipeNettyClientKeyedObjectPool(), scheduled, executors).execute();
 		
 		logger.info(remarkableMessage("make backup keeper active"));
 		//make backup active
@@ -69,9 +68,9 @@ public class KeeperSingleDcSlaveof extends AbstractKeeperIntegratedSingleDc {
 		setKeeperState(activeKeeper, KeeperState.BACKUP, backupKeeper.getIp(), backupKeeper.getPort(), false);
 
 		if (xslaveof) {
-			new XSlaveofJob(slaves, backupKeeper.getIp(), backupKeeper.getPort(), getXpipeNettyClientKeyedObjectPool(), scheduled).execute().sync();
+			new XSlaveofJob(slaves, backupKeeper.getIp(), backupKeeper.getPort(), getXpipeNettyClientKeyedObjectPool(), scheduled, executors).execute().sync();
 		} else {
-			new SlaveofJob(slaves, backupKeeper.getIp(), backupKeeper.getPort(), getXpipeNettyClientKeyedObjectPool(), scheduled).execute().sync();
+			new SlaveofJob(slaves, backupKeeper.getIp(), backupKeeper.getPort(), getXpipeNettyClientKeyedObjectPool(), scheduled, executors).execute().sync();
 		}
 
 		sleep(2000);

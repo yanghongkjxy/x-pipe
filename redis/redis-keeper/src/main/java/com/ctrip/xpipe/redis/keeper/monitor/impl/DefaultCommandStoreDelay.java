@@ -1,16 +1,16 @@
 package com.ctrip.xpipe.redis.keeper.monitor.impl;
 
 
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.ctrip.xpipe.exception.ExceptionLogWrapper;
 import com.ctrip.xpipe.redis.core.store.CommandStore;
 import com.ctrip.xpipe.redis.core.store.CommandsListener;
 import com.ctrip.xpipe.redis.keeper.monitor.CommandStoreDelay;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.IntSupplier;
 
 /**
  * @author wenchao.meng
@@ -29,7 +29,7 @@ public class DefaultCommandStoreDelay implements CommandStoreDelay{
 	
 	private int SUPPORT_OFFSETS = Integer.parseInt(System.getProperty("SUPPORT_OFFSETS", "30")); 
 	
-	private int delayLogLimitMicro;
+	private IntSupplier delayLogLimitMicro;
 
 	private OffsetDelay[] offsetDelays = new OffsetDelay[SUPPORT_OFFSETS];
 	
@@ -41,11 +41,11 @@ public class DefaultCommandStoreDelay implements CommandStoreDelay{
 	
 
 	public DefaultCommandStoreDelay(CommandStore commandStore){
-		this(commandStore, DEFAULT_DELAY_LOG_LIMIT_MICRO);
+		this(commandStore, () -> DEFAULT_DELAY_LOG_LIMIT_MICRO);
 	}
 
 	
-	public DefaultCommandStoreDelay(CommandStore commandStore, int delayLogLimitMicro){
+	public DefaultCommandStoreDelay(CommandStore commandStore, IntSupplier delayLogLimitMicro){
 		
 		this.commandStore = commandStore;
 		this.delayLogLimitMicro = delayLogLimitMicro;
@@ -278,7 +278,7 @@ public class DefaultCommandStoreDelay implements CommandStoreDelay{
 					}
 				}finally{
 					beginSendTime.set(0);
-					endSendTime.set(0);;
+					endSendTime.set(0);
 					this.commandsListener = null;
 				}
 			}
@@ -302,7 +302,7 @@ public class DefaultCommandStoreDelay implements CommandStoreDelay{
 	protected boolean logIfShould(long begin, long end, String message) {
 		
 		long delayMicro = (end - begin)/1000;
-		if(delayMicro >= delayLogLimitMicro) {
+		if(delayMicro >= delayLogLimitMicro.getAsInt()) {
 			logger.info("{}, {}, {}, delay:{} micro", message, begin, end, delayMicro);
 			return true;
 		}

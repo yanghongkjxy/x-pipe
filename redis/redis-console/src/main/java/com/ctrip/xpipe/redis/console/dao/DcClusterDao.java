@@ -1,25 +1,18 @@
 package com.ctrip.xpipe.redis.console.dao;
 
-import java.util.LinkedList;
-import java.util.List;
-
-import javax.annotation.PostConstruct;
-
+import com.ctrip.xpipe.redis.console.annotation.DalTransaction;
+import com.ctrip.xpipe.redis.console.exception.ServerException;
+import com.ctrip.xpipe.redis.console.model.*;
+import com.ctrip.xpipe.redis.console.query.DalQuery;
 import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Repository;
 import org.unidal.dal.jdbc.DalException;
 import org.unidal.lookup.ContainerLoader;
 
-import com.ctrip.xpipe.redis.console.annotation.DalTransaction;
-import com.ctrip.xpipe.redis.console.exception.ServerException;
-import com.ctrip.xpipe.redis.console.model.DcClusterShardTbl;
-import com.ctrip.xpipe.redis.console.model.DcClusterShardTblDao;
-import com.ctrip.xpipe.redis.console.model.DcClusterShardTblEntity;
-import com.ctrip.xpipe.redis.console.model.DcClusterTbl;
-import com.ctrip.xpipe.redis.console.model.DcClusterTblDao;
-import com.ctrip.xpipe.redis.console.model.DcClusterTblEntity;
-import com.ctrip.xpipe.redis.console.query.DalQuery;
+import javax.annotation.PostConstruct;
+import java.util.LinkedList;
+import java.util.List;
 
 
 /**
@@ -47,7 +40,10 @@ public class DcClusterDao extends AbstractXpipeConsoleDAO{
 	
 	@DalTransaction
 	public void deleteDcClustersBatch(List<DcClusterTbl> dcClusters) throws DalException {
-		if(null == dcClusters) throw new DalException("Null cannot be deleted.");
+		if(null == dcClusters || !dcClusters.isEmpty()) {
+			logger.warn("[deleteDcClustersBatch] Empty dcClusters list: {}", dcClusters);
+			return;
+		}
 		
 		List<DcClusterShardTbl> dcClusterShards = new LinkedList<DcClusterShardTbl>();
 		for(final DcClusterTbl dcCluster : dcClusters) {
@@ -63,8 +59,15 @@ public class DcClusterDao extends AbstractXpipeConsoleDAO{
 			}
 		}
 		dcClusterShardDao.deleteDcClusterShardsBatch(dcClusterShards);
-		
-		dcClusterTblDao.deleteBatch(dcClusters.toArray(new DcClusterTbl[dcClusters.size()]), DcClusterTblEntity.UPDATESET_FULL);
+
+		queryHandler.handleBatchDelete(new DalQuery<int[]>() {
+			@Override
+			public int[] doQuery() throws DalException {
+				return dcClusterTblDao.deleteBatch(dcClusters.toArray(new DcClusterTbl[dcClusters.size()]),
+						DcClusterTblEntity.UPDATESET_FULL);
+			}
+		}, true);
+
 	}
 
 	@DalTransaction
@@ -81,8 +84,14 @@ public class DcClusterDao extends AbstractXpipeConsoleDAO{
 		if(null != dcClusterShards) {
 			dcClusterShardDao.deleteDcClusterShardsBatch(dcClusterShards);
 		}
-		
-		dcClusterTblDao.deleteBatch(dcCluster, DcClusterTblEntity.UPDATESET_FULL);
+
+		queryHandler.handleDelete(new DalQuery<Integer>() {
+			@Override
+			public Integer doQuery() throws DalException {
+				return dcClusterTblDao.deleteBatch(dcCluster, DcClusterTblEntity.UPDATESET_FULL);
+			}
+		}, true);
+
 	}
 	
 }

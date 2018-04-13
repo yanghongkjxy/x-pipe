@@ -1,7 +1,5 @@
 package com.ctrip.xpipe.redis.core.protocal.cmd;
 
-import java.util.concurrent.ScheduledExecutorService;
-
 import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.api.payload.InOutPayload;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
@@ -9,27 +7,30 @@ import com.ctrip.xpipe.netty.commands.AbstractNettyRequestResponseCommand;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.payload.ByteArrayOutputStreamPayload;
 import com.ctrip.xpipe.redis.core.exception.RedisRuntimeException;
+import com.ctrip.xpipe.redis.core.protocal.LoggableRedisCommand;
 import com.ctrip.xpipe.redis.core.protocal.RedisClientProtocol;
 import com.ctrip.xpipe.redis.core.protocal.RedisCommand;
-import com.ctrip.xpipe.redis.core.protocal.protocal.ArrayParser;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser;
-import com.ctrip.xpipe.redis.core.protocal.protocal.LongParser;
-import com.ctrip.xpipe.redis.core.protocal.protocal.RedisErrorParser;
-import com.ctrip.xpipe.redis.core.protocal.protocal.SimpleStringParser;
-
+import com.ctrip.xpipe.redis.core.protocal.protocal.*;
+import com.ctrip.xpipe.utils.StringUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
+
+import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * @author wenchao.meng
  *
  * 2016年3月24日 下午12:04:13
  */
-public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestResponseCommand<T> implements RedisCommand<T>{
+public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestResponseCommand<T> implements LoggableRedisCommand<T> {
 	
-	public static int DEFAULT_REDIS_COMMAND_TIME_OUT_MILLI = Integer.parseInt(System.getProperty("DEFAULT_REDIS_COMMAND_TIME_OUT_SECONDS", "30000"));
+	public static int DEFAULT_REDIS_COMMAND_TIME_OUT_MILLI = Integer.parseInt(System.getProperty("DEFAULT_REDIS_COMMAND_TIME_OUT_SECONDS", "500"));
 	
 	private int commandTimeoutMilli = DEFAULT_REDIS_COMMAND_TIME_OUT_MILLI;
+
+	private boolean logResponse = true;
+
+	private boolean logRequest = true;
 
 	public AbstractRedisCommand(String host, int port, ScheduledExecutorService scheduled){
 		super(host, port, scheduled);
@@ -139,15 +140,17 @@ public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestRespon
 			
 			logger.debug("[payloadToString]{}", payload);
 			return (String)payload;
-		}if(payload instanceof ByteArrayOutputStreamPayload){
+		}
+		if(payload instanceof ByteArrayOutputStreamPayload){
 			
 			ByteArrayOutputStreamPayload baous = (ByteArrayOutputStreamPayload) payload;
 			String result = new String(baous.getBytes(), Codec.defaultCharset); 
 			logger.debug("[payloadToString]{}", result);
 			return result;
 		}
-		
-		throw new IllegalStateException("unknown payload:" + payload);
+
+		String clazz = payload == null ? "null" : payload.getClass().getSimpleName();
+		throw new IllegalStateException(String.format("unknown payload %s:%s", clazz, StringUtil.toString(payload)));
 	}
 	
 	
@@ -185,4 +188,23 @@ public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestRespon
 		this.commandTimeoutMilli = commandTimeoutMilli;
 	}
 
+	@Override
+	protected boolean logRequest() {
+		return logRequest;
+	}
+
+	@Override
+	protected boolean logResponse() {
+		return logResponse;
+	}
+
+	@Override
+	public void logResponse(boolean logResponse) {
+		this.logResponse = logResponse;
+	}
+
+	@Override
+	public void logRequest(boolean logRequest) {
+		this.logRequest = logRequest;
+	}
 }
