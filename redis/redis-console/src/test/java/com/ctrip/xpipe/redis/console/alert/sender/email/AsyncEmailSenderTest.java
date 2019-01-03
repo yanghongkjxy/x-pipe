@@ -1,7 +1,9 @@
 package com.ctrip.xpipe.redis.console.alert.sender.email;
 
-import com.ctrip.xpipe.api.email.EmailType;
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
+import com.ctrip.xpipe.redis.console.alert.ALERT_TYPE;
+import com.ctrip.xpipe.redis.console.alert.AlertEntity;
 import com.ctrip.xpipe.redis.console.alert.AlertMessageEntity;
 import com.ctrip.xpipe.redis.console.alert.sender.email.listener.AsyncEmailSenderCallback;
 import com.ctrip.xpipe.redis.console.alert.sender.email.listener.CompositeEmailSenderCallback;
@@ -11,8 +13,6 @@ import org.junit.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
-
-import static org.junit.Assert.*;
 
 /**
  * @author chen.zhu
@@ -36,7 +36,15 @@ public class AsyncEmailSenderTest extends AbstractConsoleIntegrationTest {
 
     @Test
     public void testSend() throws Exception {
-        sender.send(new AlertMessageEntity("Test", EmailType.CONSOLE_ALERT, "test", Lists.newArrayList("test-list")));
+        sender.send(new AlertMessageEntity("Test", "test", Lists.newArrayList("test-list")));
+    }
+
+    @Test
+    public void testCreateEventModel() {
+        AlertMessageEntity message = new AlertMessageEntity("Test", "test", Lists.newArrayList("test-list"));
+        message.setAlert(new AlertEntity(new HostPort("192.168.0.1", 1234), dcNames[0], "clusterId", "shardId",
+                "message", ALERT_TYPE.CLIENT_INSTANCE_NOT_OK));
+
     }
 
 }

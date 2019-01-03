@@ -1,6 +1,7 @@
 package com.ctrip.xpipe.redis.console.controller.api.data.meta;
 
 import com.ctrip.xpipe.utils.IpUtils;
+import jline.internal.Nullable;
 
 /**
  * @author chen.zhu
@@ -16,6 +17,20 @@ public class KeeperContainerCreateInfo extends AbstractCreateInfo {
     private int keepercontainerPort;
 
     private long keepercontainerOrgId;
+
+    @Nullable
+    private String orgName;
+
+    private boolean active;
+
+    public boolean isActive() {
+        return active;
+    }
+
+    public KeeperContainerCreateInfo setActive(boolean active) {
+        this.active = active;
+        return this;
+    }
 
     @Override
     public void check() throws CheckFailException {
@@ -60,6 +75,27 @@ public class KeeperContainerCreateInfo extends AbstractCreateInfo {
 
     public KeeperContainerCreateInfo setKeepercontainerOrgId(long keepercontainerOrgId) {
         this.keepercontainerOrgId = keepercontainerOrgId;
+        return this;
+    }
+
+    @Override
+    public String toString() {
+        return "KeeperContainerCreateInfo{" +
+                "dcName='" + dcName + '\'' +
+                ", keepercontainerIp='" + keepercontainerIp + '\'' +
+                ", keepercontainerPort=" + keepercontainerPort +
+                ", keepercontainerOrgId=" + keepercontainerOrgId +
+                ", orgName='" + orgName + '\'' +
+                ", active=" + active +
+                '}';
+    }
+
+    public String getOrgName() {
+        return orgName;
+    }
+
+    public KeeperContainerCreateInfo setOrgName(String orgName) {
+        this.orgName = orgName;
         return this;
     }
 }

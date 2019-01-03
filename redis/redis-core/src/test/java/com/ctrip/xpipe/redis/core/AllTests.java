@@ -13,6 +13,15 @@ import com.ctrip.xpipe.redis.core.protocal.cmd.*;
 import com.ctrip.xpipe.redis.core.protocal.pojo.MasterInfoTest;
 import com.ctrip.xpipe.redis.core.protocal.pojo.MasterRoleTest;
 import com.ctrip.xpipe.redis.core.protocal.protocal.*;
+import com.ctrip.xpipe.redis.core.proxy.command.ProxyMonitorCommandTest;
+import com.ctrip.xpipe.redis.core.proxy.command.ProxyPingCommandTest;
+import com.ctrip.xpipe.redis.core.proxy.monitor.SessionTrafficResultTest;
+import com.ctrip.xpipe.redis.core.proxy.monitor.TunnelTrafficResultTest;
+import com.ctrip.xpipe.redis.core.proxy.parser.DefaultProxyConnectProtocolParserTest;
+import com.ctrip.xpipe.redis.core.proxy.parser.TestForAbstractProxyProtocolParser;
+import com.ctrip.xpipe.redis.core.proxy.parser.content.CompressParserTest;
+import com.ctrip.xpipe.redis.core.proxy.parser.content.DefaultProxyContentParserTest;
+import com.ctrip.xpipe.redis.core.proxy.protocols.DefaultProxyConnectProtocolTest;
 import com.ctrip.xpipe.redis.core.redis.DefaultRunIdGeneratorTest;
 import com.ctrip.xpipe.redis.core.store.ReplicationStoreMetaTest;
 import org.junit.runner.RunWith;
@@ -41,6 +50,7 @@ import org.junit.runners.Suite.SuiteClasses;
 	ShardMetaComparatorTest.class,
 	InfoResultExtractorTest.class,
 	RoleCommandTest.class,
+	KeeperCommandTest.class,
 	MasterRoleTest.class,
 	MasterInfoTest.class,
 	DcInfoTest.class,
@@ -51,7 +61,16 @@ import org.junit.runners.Suite.SuiteClasses;
 	RoleCommandTest.class,
 	PingCommandTest.class,
 	RedisCommandTest.class,
-	DefaultSlaveOfCommandTest.class
+	DefaultSlaveOfCommandTest.class,
+	ProxyMonitorCommandTest.class,
+	ProxyPingCommandTest.class,
+	CompressParserTest.class,
+	DefaultProxyContentParserTest.class,
+	DefaultProxyConnectProtocolTest.class,
+	DefaultProxyConnectProtocolParserTest.class,
+	TestForAbstractProxyProtocolParser.class,
+	SessionTrafficResultTest.class,
+	TunnelTrafficResultTest.class
 })
 public class AllTests {
 

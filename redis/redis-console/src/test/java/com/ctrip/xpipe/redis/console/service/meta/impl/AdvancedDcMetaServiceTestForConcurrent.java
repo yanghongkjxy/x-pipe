@@ -1,6 +1,5 @@
 package com.ctrip.xpipe.redis.console.service.meta.impl;
 
-import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.command.AbstractCommand;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
 import com.ctrip.xpipe.redis.console.model.*;
@@ -8,7 +7,10 @@ import com.ctrip.xpipe.redis.console.service.*;
 import com.ctrip.xpipe.redis.console.service.meta.DcMetaService;
 import com.ctrip.xpipe.redis.core.entity.*;
 import com.ctrip.xpipe.redis.core.meta.MetaUtils;
-import com.ctrip.xpipe.redis.core.meta.comparator.*;
+import com.ctrip.xpipe.redis.core.meta.comparator.AbstractMetaComparator;
+import com.ctrip.xpipe.redis.core.meta.comparator.ClusterChange;
+import com.ctrip.xpipe.redis.core.meta.comparator.DcChange;
+import com.ctrip.xpipe.redis.core.meta.comparator.ShardChange;
 import com.ctrip.xpipe.tuple.Pair;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -330,7 +332,7 @@ public class AdvancedDcMetaServiceTestForConcurrent extends AbstractConsoleInteg
     protected String prepareDatas() throws IOException {
         // empty the database
         String sql = prepareDatasFromFile("src/main/resources/sql/h2/xpipedemodbtables.sql");
-        sql += "insert into dc_tbl(id, dc_name, dc_active, dc_description) values (1, 'NTGXH', 1, 'NTGXH'), (2, 'UAT', 2, 'UAT');";
+        sql += "insert into dc_tbl(zone_id, id, dc_name, dc_active, dc_description) values (1, 1, 'NTGXH', 1, 'NTGXH'), (1, 2, 'UAT', 2, 'UAT');";
         return sql;
     }
 

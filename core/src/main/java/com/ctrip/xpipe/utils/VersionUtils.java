@@ -82,9 +82,14 @@ public class VersionUtils {
         }
 
         @Override
+        public int hashCode() {
+            return ObjectUtils.hashCode(major, minor, patch);
+        }
+
+        @Override
         public int compareTo(Version other) {
 
-            if (this == other) {
+            if (this.equals(other)) {
                 return 0;
             }
             int diff = 0;

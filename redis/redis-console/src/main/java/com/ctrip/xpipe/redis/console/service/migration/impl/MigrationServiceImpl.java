@@ -1,9 +1,11 @@
 package com.ctrip.xpipe.redis.console.service.migration.impl;
 
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.console.alert.ALERT_TYPE;
 import com.ctrip.xpipe.redis.console.alert.AlertManager;
 import com.ctrip.xpipe.redis.console.dao.MigrationClusterDao;
 import com.ctrip.xpipe.redis.console.dao.MigrationEventDao;
+import com.ctrip.xpipe.redis.console.healthcheck.nonredis.migration.MigrationSystemAvailableChecker;
 import com.ctrip.xpipe.redis.console.migration.manager.MigrationEventManager;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
@@ -12,13 +14,12 @@ import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.query.DalQuery;
 import com.ctrip.xpipe.redis.console.service.AbstractConsoleService;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
+import com.ctrip.xpipe.redis.console.service.ConfigService;
 import com.ctrip.xpipe.redis.console.service.DcService;
 import com.ctrip.xpipe.redis.console.service.migration.MigrationService;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterActiveDcNotRequest;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterMigratingNow;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterNotFoundException;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ToIdcNotFoundException;
+import com.ctrip.xpipe.redis.console.service.migration.exception.*;
 import com.ctrip.xpipe.utils.StringUtil;
+import com.ctrip.xpipe.utils.VisibleForTesting;
 import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -29,6 +30,7 @@ import javax.annotation.PostConstruct;
 import java.rmi.ServerException;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventTblDao> implements MigrationService {
@@ -50,6 +52,12 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
 
     @Autowired
     private MigrationClusterDao migrationClusterDao;
+
+    @Autowired
+    private MigrationSystemAvailableChecker checker;
+
+    @Autowired
+    private ConfigService configService;
 
     private MigrationShardTblDao migrationShardTblDao;
 
@@ -81,8 +89,6 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
             }
         });
     }
-
-    ;
 
     @Override
     public MigrationClusterTbl findMigrationCluster(final long eventId, final long clusterId) {
@@ -232,6 +238,19 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
         }
     }
 
+    @Override
+    public MigrationSystemAvailableChecker.MigrationSystemAvailability getMigrationSystemAvailability() {
+        MigrationSystemAvailableChecker.MigrationSystemAvailability availability =  checker.getResult();
+        if(availability.isAvaiable() && !availability.isWarning()) {
+            if (System.currentTimeMillis() - availability.getTimestamp() >= TimeUnit.MINUTES.toMillis(2)) {
+                String message = "not updated over 2 min\n";
+                availability.addWarningMessage(message);
+                alertManager.alert("", "", new HostPort(), ALERT_TYPE.MIGRATION_SYSTEM_CHECK_OVER_DUE, message);
+            }
+        }
+        return availability;
+    }
+
     private boolean isMigrationClusterExist(long eventId, long clusterId) {
         boolean ret = false;
         if (null != migrationEventManager.getEvent(eventId)) {
@@ -243,8 +262,11 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
     }
 
     @Override
-    public TryMigrateResult tryMigrate(String clusterName, String fromIdc, String toIdc) throws ClusterNotFoundException, ClusterActiveDcNotRequest, ClusterMigratingNow, ToIdcNotFoundException {
+    public TryMigrateResult tryMigrate(String clusterName, String fromIdc, String toIdc) throws ClusterNotFoundException, ClusterActiveDcNotRequest, ClusterMigratingNow, ToIdcNotFoundException, MigrationSystemNotHealthyException {
 
+        if(!checker.getResult().isAvaiable() && !configService.ignoreMigrationSystemAvailability()) {
+            throw new MigrationSystemNotHealthyException(checker.getResult().getMessage());
+        }
         ClusterTbl clusterTbl = clusterService.find(clusterName);
         if (clusterTbl == null) {
             throw new ClusterNotFoundException(clusterName);
@@ -272,10 +294,17 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
 
     protected DcTbl findToDc(String fromIdc, String toIdc, List<DcTbl> clusterRelatedDc) throws ToIdcNotFoundException {
 
+        DcTbl fromIdcInfo = null;
+        for(DcTbl dcTbl : clusterRelatedDc) {
+            if(dcTbl.getDcName().equals(fromIdc)) {
+                fromIdcInfo = dcTbl;
+                break;
+            }
+        }
         if(StringUtil.isEmpty(toIdc)){
             //simple
             for (DcTbl dcTbl : clusterRelatedDc) {
-                if (!dcTbl.getDcName().equalsIgnoreCase(fromIdc)) {
+                if (!dcTbl.getDcName().equalsIgnoreCase(fromIdc) && isSameZone(fromIdcInfo, dcTbl)) {
                     return dcTbl;
                 }
             }
@@ -288,6 +317,9 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
 
             for (DcTbl dcTbl : clusterRelatedDc) {
                 if (dcTbl.getDcName().equalsIgnoreCase(toIdc)) {
+                    if(!isSameZone(fromIdcInfo, dcTbl)) {
+                        throw new ToIdcNotFoundException("To Idc should be in same zone with from Idc");
+                    }
                     return dcTbl;
                 }
             }
@@ -295,8 +327,27 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
         }
     }
 
+    protected boolean isSameZone(DcTbl fromIdc, DcTbl toIdc) {
+        try {
+            return fromIdc.getZoneId() == toIdc.getZoneId();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private String clusterRelatedDcToString(List<DcTbl> clusterRelatedDc) {
         return StringUtil.join(",", (dcTbl) -> dcTbl.getDcName() , clusterRelatedDc);
     }
 
+    @VisibleForTesting
+    protected MigrationServiceImpl setAlertManager(AlertManager alertManager) {
+        this.alertManager = alertManager;
+        return this;
+    }
+
+    @VisibleForTesting
+    protected MigrationServiceImpl setChecker(MigrationSystemAvailableChecker checker) {
+        this.checker = checker;
+        return this;
+    }
 }

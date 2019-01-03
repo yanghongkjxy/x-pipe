@@ -4,7 +4,6 @@ import com.ctrip.xpipe.metric.MetricData;
 import com.ctrip.xpipe.metric.MetricProxy;
 import com.ctrip.xpipe.metric.MetricProxyException;
 import com.ctrip.xpipe.redis.integratedtest.stability.MetricLog;
-import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,12 +30,17 @@ public class HickwallMetric implements MetricLog {
     @Override
     public void log(String desc, String metricSub, long delayNanos) {
 
-        MetricData metricData = new MetricData(desc, clusterKey, metricSub);
+        if(metricProxy == null){
+            logger.info("[log][null return]");
+            return;
+        }
+
+        MetricData metricData = new MetricData(desc, "dc", clusterKey, metricSub);
         metricData.setTimestampMilli(System.currentTimeMillis());
         metricData.setValue(delayNanos);
 
         try {
-            metricProxy.writeBinMultiDataPoint(Lists.newArrayList(metricData));
+            metricProxy.writeBinMultiDataPoint(metricData);
         } catch (MetricProxyException e) {
             logger.error("[log]", e);
         }

@@ -90,7 +90,8 @@ public class XRedisPartialTest extends AbstractKeeperIntegratedSingleDc {
     @Override
     protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeperMeta, File baseDir, KeeperConfig keeperConfig, MetaServerKeeperService metaService, LeaderElectorManager leaderElectorManager, KeepersMonitorManager keeperMonitorManager) {
 
-        return new DefaultRedisKeeperServer(keeperMeta, keeperConfig, baseDir, metaService, leaderElectorManager, keeperMonitorManager) {
+        return new DefaultRedisKeeperServer(keeperMeta, keeperConfig, baseDir, metaService, leaderElectorManager,
+                keeperMonitorManager, proxyResourceManager) {
 
             private int count = 0;
 

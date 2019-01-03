@@ -1,6 +1,8 @@
 package com.ctrip.xpipe.redis.console.controller.consoleportal;
 
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
+import com.ctrip.xpipe.redis.console.healthcheck.nonredis.cluster.ClusterHealthMonitorManager;
+import com.ctrip.xpipe.redis.console.healthcheck.nonredis.cluster.ClusterHealthState;
 import com.ctrip.xpipe.redis.console.model.ClusterModel;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.DcClusterTbl;
@@ -10,6 +12,7 @@ import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
 import com.ctrip.xpipe.utils.StringUtil;
+import com.google.common.collect.Sets;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -28,6 +31,8 @@ public class ClusterController extends AbstractConsoleController {
     private ClusterService clusterService;
     @Autowired
     private DcClusterService dcClusterService;
+    @Autowired
+    private ClusterHealthMonitorManager clusterHealthMonitorManager;
 
     @RequestMapping(value = "/clusters/" + CLUSTER_NAME_PATH_VARIABLE + "/dcs", method = RequestMethod.GET)
     public List<DcTbl> findClusterDcs(@PathVariable String clusterName) {
@@ -117,6 +122,33 @@ public class ClusterController extends AbstractConsoleController {
     public void unbindDc(@PathVariable String clusterName, @PathVariable String dcName) {
         logger.info("[unbindDc]{}, {}", clusterName, dcName);
         clusterService.unbindDc(clusterName, dcName);
+    }
+
+    @RequestMapping(value = "/clusters/allBind/{dcName}", method = RequestMethod.GET)
+    public List<ClusterTbl> findClustersByDcNameBind(@PathVariable String dcName){
+        logger.info("[findClustersByDcId]dcName: {}", dcName);
+        return clusterService.findAllClusterByDcNameBind(dcName);
+    }
+
+    @RequestMapping(value = "/clusters/activeDc/{dcName}", method = RequestMethod.GET)
+    public List<ClusterTbl> findClustersByActiveDcName(@PathVariable String dcName){
+        logger.info("[findClustersByActiveDcName]dcName: {}", dcName);
+        return clusterService.findAllClustersByDcName(dcName);
+    }
+
+    @RequestMapping(value = "/clusters/master/unhealthy/{level}", method = RequestMethod.GET)
+    public Set<String> getMasterUnhealthyClusters(@PathVariable  String level) {
+        logger.info("[getMasterUnhealthyClusters]level: {}", level);
+        ClusterHealthState state = null;
+        try {
+            state = ClusterHealthState.valueOf(level.toUpperCase());
+        } catch (Exception e) {
+            logger.error("[getMasterUnhealthyClusters] level not matched: {}", level);
+        }
+        if(state != null) {
+            return clusterHealthMonitorManager.getWarningClusters(state);
+        }
+        return Sets.newHashSet();
     }
 
 }

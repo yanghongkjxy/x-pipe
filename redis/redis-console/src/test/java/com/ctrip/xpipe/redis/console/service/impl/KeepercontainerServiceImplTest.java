@@ -122,7 +122,8 @@ public class KeepercontainerServiceImplTest extends AbstractServiceImplTest{
     public void testAddKeeperContainer2() {
         KeeperContainerCreateInfo createInfo = new KeeperContainerCreateInfo()
                 .setDcName(dcNames[0]).setKeepercontainerIp("192.168.0.1")
-                .setKeepercontainerPort(9090).setKeepercontainerOrgId(3L);
+                .setKeepercontainerPort(9090).setKeepercontainerOrgId(3L)
+                .setActive(true);
 
         keepercontainerService.addKeeperContainer(createInfo);
 
@@ -152,6 +153,36 @@ public class KeepercontainerServiceImplTest extends AbstractServiceImplTest{
         } catch (Exception e) {
             Assert.assertEquals("Keeper Container with IP: " + createInfo.getKeepercontainerIp() + " already exists", e.getMessage());
             throw e;
+        }
+    }
+
+    @Test
+    public void testGetDcAllKeeperContainers() {
+        testAddKeeperContainer2();
+        List<KeeperContainerCreateInfo> keepers = keepercontainerService.getDcAllKeeperContainers(dcNames[0]);
+        keepers.forEach(kc -> logger.info("[keeper] {}", kc));
+    }
+
+    @Test
+    public void testUpdate() {
+        List<KeeperContainerCreateInfo> keepers = keepercontainerService.getDcAllKeeperContainers(dcNames[0]);
+        KeeperContainerCreateInfo sample = null;
+        for(KeeperContainerCreateInfo info : keepers) {
+            if(info.getKeepercontainerOrgId() != 0L) {
+                sample = info;
+                break;
+            }
+        }
+        if(sample != null) {
+            logger.info("[sample] {}", sample);
+            sample.setKeepercontainerOrgId(0L);
+            keepercontainerService.updateKeeperContainer(sample);
+            KeepercontainerTbl ktl = keepercontainerService.findByIpPort(sample.getKeepercontainerIp(),
+                    sample.getKeepercontainerPort());
+
+            Assert.assertNotNull(ktl);
+            Assert.assertEquals(0L, ktl.getKeepercontainerOrgId());
+            logger.info("[ktl] {}", ktl);
         }
     }
 
