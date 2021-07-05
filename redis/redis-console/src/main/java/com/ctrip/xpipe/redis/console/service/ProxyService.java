@@ -1,11 +1,13 @@
 package com.ctrip.xpipe.redis.console.service;
 
+import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.checker.ProxyManager;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
 import com.ctrip.xpipe.redis.console.model.ProxyModel;
 import com.ctrip.xpipe.redis.console.model.ProxyPingStatsModel;
 import com.ctrip.xpipe.redis.console.model.ProxyTbl;
 import com.ctrip.xpipe.redis.console.model.consoleportal.ProxyInfoModel;
 import com.ctrip.xpipe.redis.console.proxy.ProxyChain;
-import com.ctrip.xpipe.redis.console.proxy.ProxyMonitorCollector;
 import com.ctrip.xpipe.redis.console.proxy.TunnelInfo;
 
 import java.util.List;
@@ -15,7 +17,7 @@ import java.util.List;
  * <p>
  * Jun 19, 2018
  */
-public interface ProxyService {
+public interface ProxyService extends ProxyManager {
 
     /**Proxy Database related*/
     List<ProxyModel> getActiveProxies();
@@ -44,4 +46,6 @@ public interface ProxyService {
     List<ProxyPingStatsModel> getProxyMonitorCollectors(String dcName);
 
     List<ProxyInfoModel> getAllProxyInfo();
+
+    RetMessage deleteProxyChain(List<HostPort> proxies);
 }

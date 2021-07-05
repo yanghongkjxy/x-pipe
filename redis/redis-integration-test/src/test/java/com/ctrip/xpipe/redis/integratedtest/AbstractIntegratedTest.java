@@ -3,23 +3,20 @@ package com.ctrip.xpipe.redis.integratedtest;
 import com.ctrip.xpipe.api.cluster.LeaderElectorManager;
 import com.ctrip.xpipe.cluster.DefaultLeaderElectorManager;
 import com.ctrip.xpipe.redis.core.AbstractRedisTest;
-import com.ctrip.xpipe.redis.core.config.MetaServerAddressAware;
 import com.ctrip.xpipe.redis.core.entity.*;
 import com.ctrip.xpipe.redis.core.meta.MetaUtils;
-import com.ctrip.xpipe.redis.core.metaserver.DefaultMetaServerLocator;
-import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
-import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpointManager;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.NaiveNextHopAlgorithm;
-import com.ctrip.xpipe.redis.core.proxy.resource.KeeperProxyResourceManager;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.config.DefaultKeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.DefaultKeeperResourceManager;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.KeeperResourceManager;
 import com.ctrip.xpipe.redis.keeper.impl.DefaultRedisKeeperServer;
-import com.ctrip.xpipe.redis.keeper.meta.DefaultMetaService;
 import com.ctrip.xpipe.redis.keeper.monitor.KeepersMonitorManager;
 import com.ctrip.xpipe.redis.keeper.monitor.impl.NoneKeepersMonitorManager;
 import com.ctrip.xpipe.redis.meta.server.job.XSlaveofJob;
+import com.ctrip.xpipe.utils.DefaultLeakyBucket;
 import com.ctrip.xpipe.zk.impl.DefaultZkClient;
 import com.google.common.collect.Lists;
 import org.apache.commons.io.FileUtils;
@@ -35,6 +32,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.util.*;
 
 /**
@@ -58,8 +56,8 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 
 	private Set<RedisMeta> allRedisStarted = new HashSet<>();
 
-	protected ProxyResourceManager proxyResourceManager = new KeeperProxyResourceManager(
-			new DefaultProxyEndpointManager(()->1000), new NaiveNextHopAlgorithm());
+	protected KeeperResourceManager resourceManager = new DefaultKeeperResourceManager(
+			new DefaultProxyEndpointManager(()->1000), new NaiveNextHopAlgorithm(), new DefaultLeakyBucket(100));
 
 	@BeforeClass
 	public static void beforereAbstractIntegratedTestClass(){
@@ -119,32 +117,32 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 		startZk(zkPort);
 	}
 
-	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta, MetaServerKeeperService metaService,
+	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta,
 			LeaderElectorManager leaderElectorManager) throws Exception {
 
-		return startKeeper(keeperMeta, getKeeperConfig(), metaService, leaderElectorManager);
+		return startKeeper(keeperMeta, getKeeperConfig(), leaderElectorManager);
 	}
 
 	protected KeeperConfig getKeeperConfig() {
 		return new DefaultKeeperConfig();
 	}
 
-	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta, KeeperConfig keeperConfig, MetaServerKeeperService metaService,
+	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta, KeeperConfig keeperConfig,
 			LeaderElectorManager leaderElectorManager) throws Exception {
 
 		logger.info(remarkableMessage("[startKeeper]{}, {}"), keeperMeta);
 		File baseDir = new File(getTestFileDir() + "/replication_store_" + keeperMeta.getPort());
 
-		RedisKeeperServer redisKeeperServer = createRedisKeeperServer(keeperMeta, baseDir, keeperConfig, metaService, leaderElectorManager, new NoneKeepersMonitorManager());
+		RedisKeeperServer redisKeeperServer = createRedisKeeperServer(keeperMeta, baseDir, keeperConfig, leaderElectorManager, new NoneKeepersMonitorManager());
 		add(redisKeeperServer);
 		return redisKeeperServer;
 	}
 
 	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeperMeta, File baseDir, KeeperConfig keeperConfig,
-			MetaServerKeeperService metaService, LeaderElectorManager leaderElectorManager, KeepersMonitorManager keeperMonitorManager) {
+			 LeaderElectorManager leaderElectorManager, KeepersMonitorManager keeperMonitorManager) {
 
-		return new DefaultRedisKeeperServer(keeperMeta, keeperConfig, baseDir, metaService,
-				leaderElectorManager, keeperMonitorManager, proxyResourceManager);
+		return new DefaultRedisKeeperServer(keeperMeta, keeperConfig, baseDir,
+				leaderElectorManager, keeperMonitorManager, resourceManager);
 	}
 
 	protected LeaderElectorManager createLeaderElectorManager(DcMeta dcMeta) throws Exception {
@@ -160,23 +158,6 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 		leaderElectorManager.start();
 		add(leaderElectorManager);
 		return leaderElectorManager;
-	}
-
-	protected MetaServerKeeperService createMetaService(final List<MetaServerMeta> metaServerMetas) {
-
-		DefaultMetaServerLocator metaServerLocator = new DefaultMetaServerLocator(new MetaServerAddressAware() {
-
-			@Override
-			public String getMetaServerUrl() {
-				return String.format("http://%s:%d", "localhost", metaServerMetas.get(0).getPort());
-			}
-		});
-
-		DefaultMetaService metaService = new DefaultMetaService();
-		metaService.setConfig(new DefaultKeeperConfig());
-		metaService.setMetaServerLocator(metaServerLocator);
-
-		return metaService;
 	}
 
 	protected void startRedis(RedisMeta redisMeta, RedisMeta redisMaster) throws IOException {
@@ -416,6 +397,26 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 
 	protected String getRedisTemplate() {
 		return "conf/redis_raw.conf";
+	}
+
+	protected String getCasePath(String caseName) {
+		String path = "cases/" + caseName;
+		URL url = getClass().getResource(path);
+		if (url == null) {
+		    url = getClass().getClassLoader().getResource(path);
+		}
+		if (url == null) {
+		    return null;
+		} else {
+			return url.getPath();
+		}
+	}
+
+	protected void prepareCaseIfExist() throws IOException {
+		String casePath = getCasePath(getClass().getSimpleName() + "-" + getTestName());
+		if (casePath != null) {
+			executeCommands("cp", "-rf", casePath + "/.", getTestFileDir());
+		}
 	}
 
 

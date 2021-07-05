@@ -8,8 +8,12 @@ import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisSlave;
 import com.ctrip.xpipe.redis.keeper.SLAVE_STATE;
 import com.ctrip.xpipe.redis.keeper.store.DefaultFullSyncListener;
+import com.ctrip.xpipe.utils.VisibleForTesting;
 
 import java.io.IOException;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import static com.ctrip.xpipe.redis.core.store.RdbDumpState.WAIT_DUMPPING;
 
 /**
  * @author wenchao.meng
@@ -18,9 +22,11 @@ import java.io.IOException;
  */
 public abstract class AbstractRdbDumper extends AbstractCommand<Void> implements RdbDumper {
 
-	private volatile RdbDumpState rdbDumpState = RdbDumpState.WAIT_DUMPPING;
+	private volatile RdbDumpState rdbDumpState = WAIT_DUMPPING;
 
 	protected RedisKeeperServer redisKeeperServer;
+
+	private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 
 	public AbstractRdbDumper(RedisKeeperServer redisKeeperServer) {
 		this.redisKeeperServer = redisKeeperServer;
@@ -32,24 +38,27 @@ public abstract class AbstractRdbDumper extends AbstractCommand<Void> implements
 	}
 
 	public void setRdbDumpState(RdbDumpState rdbDumpState) {
-
-		this.rdbDumpState = rdbDumpState;
-
-		switch (rdbDumpState) {
-			case DUMPING:
-				doWhenDumping();
-				break;
-			case FAIL:
-				doWhenDumpFailed();
-				redisKeeperServer.clearRdbDumper(this);
-				break;
-			case NORMAL:
-				// clear dumper
-				redisKeeperServer.clearRdbDumper(this);
-				;
-				break;
-			case WAIT_DUMPPING:
-				break;
+		lock.writeLock().lock();
+		try {
+			this.rdbDumpState = rdbDumpState;
+			switch (rdbDumpState) {
+				case DUMPING:
+					doWhenDumping();
+					break;
+				case FAIL:
+					doWhenDumpFailed();
+					redisKeeperServer.clearRdbDumper(this);
+					break;
+				case NORMAL:
+					// clear dumper
+					redisKeeperServer.clearRdbDumper(this);
+					;
+					break;
+				case WAIT_DUMPPING:
+					break;
+			}
+		} finally {
+		    lock.writeLock().unlock();
 		}
 	}
 
@@ -57,11 +66,11 @@ public abstract class AbstractRdbDumper extends AbstractCommand<Void> implements
 
 		for (final RedisSlave redisSlave : redisKeeperServer.slaves()) {
 			if (redisSlave.getSlaveState() == SLAVE_STATE.REDIS_REPL_WAIT_RDB_DUMPING) {
-				logger.info("[doWhenDumping][slave waiting for rdb, close]{}", redisSlave);
+				getLogger().info("[doWhenDumping][slave waiting for rdb, close]{}", redisSlave);
 				try {
 					redisSlave.close();
 				} catch (IOException e) {
-					logger.error("[doWhenDumpFailed][close slave]", e);
+					getLogger().error("[doWhenDumpFailed][close slave]", e);
 				}
 			}
 		}
@@ -71,14 +80,21 @@ public abstract class AbstractRdbDumper extends AbstractCommand<Void> implements
 
 		for (final RedisSlave redisSlave : redisKeeperServer.slaves()) {
 			if (redisSlave.getSlaveState() == SLAVE_STATE.REDIS_REPL_WAIT_RDB_DUMPING) {
-				logger.info("[doWhenDumping][slave waiting for rdb, resume]{}", redisSlave);
+				getLogger().info("[doWhenDumping][slave waiting for rdb, resume]{}", redisSlave);
 				redisSlave.processPsyncSequentially(new Runnable() {
 					@Override
 					public void run() {
 						try {
 							redisKeeperServer.fullSyncToSlave(redisSlave);
-						} catch (Exception e) {
-							logger.error(String.format("fullsync to slave:%s", redisSlave), e);
+						} catch (Throwable th) {
+							try {
+								getLogger().error(String.format("fullsync to slave:%s", redisSlave), th);
+								if(redisSlave.isOpen()){
+									redisSlave.close();
+								}
+							} catch (IOException e) {
+								getLogger().error("[run][close]" + redisSlave, th);
+							}
 						}
 					}
 				});
@@ -88,38 +104,49 @@ public abstract class AbstractRdbDumper extends AbstractCommand<Void> implements
 
 	@Override
 	public void tryFullSync(RedisSlave redisSlave) throws IOException {
-
-		switch (rdbDumpState) {
-
-		case DUMPING:
-			FullSyncListener fullSyncListener = new DefaultFullSyncListener(redisSlave);
-			if (!redisKeeperServer.getReplicationStore().fullSyncIfPossible(fullSyncListener)) {
-				throw new IllegalStateException("[tryFullSync][rdb dumping, but can not full synn]");
+		RdbDumpState state;
+		lock.readLock().lock();
+		try {
+			state = rdbDumpState;
+			if (state == WAIT_DUMPPING) {
+				getLogger().info("[tryFullSync][make slave waiting]{}", redisSlave);
+				redisSlave.waitForRdbDumping();
+				return;
 			}
-			break;
-		case FAIL:
-		case NORMAL:
-			logger.warn("[tryFullSync]{}", redisSlave);
-			redisKeeperServer.clearRdbDumper(this);
-			redisKeeperServer.fullSyncToSlave(redisSlave);
-			break;
-		case WAIT_DUMPPING:
-			logger.info("[tryFullSync][make slave waiting]{}", redisSlave);
-			redisSlave.waitForRdbDumping();
-			break;
+		} finally {
+			lock.readLock().unlock();
+		}
+		switch (state) {
+			case DUMPING:
+				doFullSyncOrGiveUp(redisSlave);
+				break;
+			case FAIL:
+			case NORMAL:
+				getLogger().warn("[tryFullSync]{}", redisSlave);
+				redisKeeperServer.clearRdbDumper(this);
+				redisKeeperServer.fullSyncToSlave(redisSlave);
+				break;
+		}
+
+	}
+
+	@VisibleForTesting void doFullSyncOrGiveUp(RedisSlave redisSlave) throws IOException {
+		FullSyncListener fullSyncListener = new DefaultFullSyncListener(redisSlave);
+		if (!redisKeeperServer.getReplicationStore().fullSyncIfPossible(fullSyncListener)) {
+			throw new IllegalStateException("[tryFullSync][rdb dumping, but can not full sync]");
 		}
 	}
 
 	@Override
-	public void beginReceiveRdbData(long masterOffset) {
-		logger.info("[beginReceiveRdbData]{}", this);
+	public void beginReceiveRdbData(String replId, long masterOffset) {
+		getLogger().info("[beginReceiveRdbData]{}", this);
 		setRdbDumpState(RdbDumpState.DUMPING);
 
 	}
 
 	@Override
 	public void dumpFinished() {
-		logger.info("[dumpFinished]{}", this);
+		getLogger().info("[dumpFinished]{}", this);
 		setRdbDumpState(RdbDumpState.NORMAL);
 		future().setSuccess();
 	}
@@ -128,11 +155,11 @@ public abstract class AbstractRdbDumper extends AbstractCommand<Void> implements
 	public void dumpFail(Throwable th) {
 
 		if (future().isDone()) {
-			logger.info("[dumpFail][already done]{}, {}, {}", this, th.getMessage(), future().isSuccess());
+			getLogger().info("[dumpFail][already done]{}, {}, {}", this, th.getMessage(), future().isSuccess());
 			return;
 		}
 
-		logger.info("[dumpFail]{}, {}", this, th.getMessage());
+		getLogger().info("[dumpFail]{}, {}", this, th.getMessage());
 		setRdbDumpState(RdbDumpState.FAIL);
 		future().setFailure(th);
 	}

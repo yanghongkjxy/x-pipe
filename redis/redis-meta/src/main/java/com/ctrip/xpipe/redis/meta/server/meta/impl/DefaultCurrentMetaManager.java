@@ -15,6 +15,7 @@ import com.ctrip.xpipe.redis.core.entity.RouteMeta;
 import com.ctrip.xpipe.redis.core.meta.MetaComparator;
 import com.ctrip.xpipe.redis.core.meta.comparator.ClusterMetaComparator;
 import com.ctrip.xpipe.redis.core.meta.comparator.DcMetaComparator;
+import com.ctrip.xpipe.redis.core.meta.comparator.DcRouteMetaComparator;
 import com.ctrip.xpipe.redis.meta.server.MetaServerStateChangeHandler;
 import com.ctrip.xpipe.redis.meta.server.cluster.CurrentClusterServer;
 import com.ctrip.xpipe.redis.meta.server.cluster.SlotManager;
@@ -24,6 +25,8 @@ import com.ctrip.xpipe.redis.meta.server.meta.DcMetaCache;
 import com.ctrip.xpipe.spring.AbstractSpringConfigContext;
 import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.IpUtils;
+import com.ctrip.xpipe.utils.VisibleForTesting;
+import com.google.common.collect.Lists;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -198,7 +201,7 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 
 	private void removeClusterInterested(String clusterId) {
 		//notice
-		removeCluster(new ClusterMeta(clusterId));
+		removeCluster(new ClusterMeta(clusterId).setType(dcMetaCache.getClusterType(clusterId).toString()));
 	}
 
 	@Override
@@ -254,13 +257,17 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 		if(args instanceof DcMetaComparator){
 			
 			dcMetaChange((DcMetaComparator)args);
-		}else{
+		} else if(args instanceof DcRouteMetaComparator) {
+
+			routeChanges();
+		} else{
 			
 			throw new IllegalArgumentException(String.format("unknown args(%s):%s", args.getClass(), args));
 		}
 	}
 
-	private void dcMetaChange(DcMetaComparator comparator) {
+	@VisibleForTesting
+	protected void dcMetaChange(DcMetaComparator comparator) {
 		
 		for(ClusterMeta clusterMeta : comparator.getAdded()){
 			if(currentClusterServer.hasKey(clusterMeta.getId())){
@@ -287,6 +294,25 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 			}else{
 				logger.info("[dcMetaChange][change][not interested]{}", clusterId);
 			}
+		}
+	}
+
+	@VisibleForTesting
+	protected void routeChanges() {
+		for(String clusterId : allClusters()) {
+			if(randomRoute(clusterId) != null) {
+				ClusterMeta clusterMeta = dcMetaCache.getClusterMeta(clusterId);
+				refreshKeeperMaster(clusterMeta);
+			}
+		}
+	}
+
+	@VisibleForTesting
+	protected void refreshKeeperMaster(ClusterMeta clusterMeta) {
+		Set<String> shards = clusterMeta.getShards().keySet();
+		String clusterId = clusterMeta.getId();
+		for (String shardId : shards) {
+			notifyKeeperMasterChanged(clusterId, shardId, getKeeperMaster(clusterId, shardId));
 		}
 	}
 
@@ -394,7 +420,75 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 	public boolean watchIfNotWatched(String clusterId, String shardId) {
 		return currentMeta.watchIfNotWatched(clusterId, shardId);
 	}
-	
+
+	@Override
+	public void setCurrentCRDTMaster(String clusterId, String shardId, long gid, String ip, int port) {
+		RedisMeta currentMaster = new RedisMeta().setIp(ip).setPort(port).setGid(gid);
+		currentMeta.setCurrentCRDTMaster(clusterId, shardId, currentMaster);
+		notifyCurrentMasterChanged(clusterId, shardId);
+	}
+
+	@Override
+	public RedisMeta getCurrentCRDTMaster(String clusterId, String shardId) {
+		return currentMeta.getCurrentCRDTMaster(clusterId, shardId);
+	}
+
+	@Override
+	public RedisMeta getCurrentMaster(String clusterId, String shardId) {
+		return currentMeta.getCurrentMaster(clusterId, shardId);
+	}
+
+	@Override
+	public void setPeerMaster(String dcId, String clusterId, String shardId, long gid, String ip, int port) {
+		if (dcMetaCache.getCurrentDc().equalsIgnoreCase(dcId)) {
+			throw new IllegalArgumentException(String.format("peer master must from other dc %s %s %d %s:%d",
+					clusterId, shardId, gid, ip, port));
+		}
+
+		RedisMeta peerMaster = new RedisMeta().setIp(ip).setPort(port).setGid(gid);
+		currentMeta.setPeerMaster(dcId, clusterId, shardId, peerMaster);
+		notifyPeerMasterChange(dcId, clusterId, shardId);
+	}
+
+	@Override
+	public RedisMeta getPeerMaster(String dcId, String clusterId, String shardId) {
+		return currentMeta.getPeerMaster(dcId, clusterId, shardId);
+	}
+
+	@Override
+	public Set<String> getUpstreamPeerDcs(String clusterId, String shardId) {
+		return currentMeta.getUpstreamPeerDcs(clusterId, shardId);
+	}
+
+	public List<RedisMeta> getAllPeerMasters(String clusterId, String shardId) {
+		return currentMeta.getAllPeerMasters(clusterId, shardId);
+	}
+
+	@Override
+	public void removePeerMaster(String dcId, String clusterId, String shardId) {
+		currentMeta.removePeerMaster(dcId, clusterId, shardId);
+	}
+
+	private void notifyCurrentMasterChanged(String clusterId, String shardId) {
+		for (MetaServerStateChangeHandler stateHandler : stateHandlers){
+			try {
+				stateHandler.currentMasterChanged(clusterId, shardId);
+			} catch (Exception e) {
+				logger.error("[notifyCurrentMasterChanged] {}, {}", clusterId, shardId, e);
+			}
+		}
+	}
+
+	private void notifyPeerMasterChange(String dcId, String clusterId, String shardId) {
+		for(MetaServerStateChangeHandler stateHandler : stateHandlers){
+			try {
+				stateHandler.peerMasterChanged(dcId, clusterId, shardId);
+			} catch (Exception e) {
+				logger.error("[notifyPeerMasterChange] {}, {}, {}", dcId, clusterId, shardId, e);
+			}
+		}
+	}
+
 	private void notifyKeeperActiveElected(String clusterId, String shardId, KeeperMeta activeKeeper) {
 		
 		for(MetaServerStateChangeHandler stateHandler : stateHandlers){
@@ -425,4 +519,16 @@ public class DefaultCurrentMetaManager extends AbstractLifecycleObservable imple
 		this.dcMetaCache = dcMetaCache;
 	}
 
+	@VisibleForTesting
+	protected void setCurrentMeta(CurrentMeta currentMeta) {
+		this.currentMeta = currentMeta;
+	}
+
+	@VisibleForTesting
+	protected void addMetaServerStateChangeHandler(MetaServerStateChangeHandler handler) {
+		if(stateHandlers == null) {
+			stateHandlers = Lists.newArrayList();
+		}
+		stateHandlers.add(handler);
+	}
 }

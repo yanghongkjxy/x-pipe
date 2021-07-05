@@ -10,7 +10,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.ctrip.framework.xpipe</groupId>
     <artifactId>xpipe-parent</artifactId>
-    <version>1.1.0-SNAPSHOT</version>
+    <version>1.2.4</version>
     <packaging>pom</packaging>
 
 
@@ -23,13 +23,12 @@
         <maven-source-plugin.version>3.0.0</maven-source-plugin.version>
         <coveralls-maven-plugin.version>4.3.0</coveralls-maven-plugin.version>
         <cobertura-maven-plugin.version>2.7</cobertura-maven-plugin.version>
-        <fastjson.version>1.2.28</fastjson.version>
         <jersey.version>2.19</jersey.version>
         <commons-exec.version>1.3</commons-exec.version>
-        <unidal.version>2.5.0</unidal.version>
+        <unidal.test.version>3.1.4</unidal.test.version>
 
-        <unidal.foundation.version>3.1.2</unidal.foundation.version>
-        <unidal.jdbc.version>3.1.2</unidal.jdbc.version>
+        <unidal.foundation.version>3.1.4</unidal.foundation.version>
+        <unidal.jdbc.version>3.1.4</unidal.jdbc.version>
 
         <unidal.codegen.version>2.5.8</unidal.codegen.version>
         <unidal.plexus.version>2.5.8</unidal.plexus.version>
@@ -39,28 +38,37 @@
         <spring-boot.version>1.4.3.RELEASE</spring-boot.version>
         <spring-boot-maven-plugin.version>1.4.3.RELEASE</spring-boot-maven-plugin.version>
         <spring-platfrom-bom.version>2.0.5.RELEASE</spring-platfrom-bom.version>
-        <ctrip-framework-foundation.version>1.8.2</ctrip-framework-foundation.version>
-        <ctrip-apollo.version>0.6.6</ctrip-apollo.version>
-        <cat.version>2.20.1</cat.version>
+        <ctrip-framework-foundation.version>1.8.11</ctrip-framework-foundation.version>
+        <ctrip-apollo.version>0.6.7</ctrip-apollo.version>
+        <cat.version>3.3.18</cat.version>
         <pyrolite.version>4.9</pyrolite.version>
         <plexus-utils.version>3.1.0</plexus-utils.version>
-        <git-commit-id-plugin.version>2.2.0</git-commit-id-plugin.version>
+        <git-commit-id-plugin.version>2.2.3</git-commit-id-plugin.version>
         <log4j2.version>2.6.2</log4j2.version>
         <disruptor.version>3.3.6</disruptor.version>
         <dnsjava.version>2.1.6</dnsjava.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <tomcat.version>8.0.33</tomcat.version>
 
-        <hickwall.client.version>1.8</hickwall.client.version>
+        <hickwall.client.version>1.10-SNAPSHOT</hickwall.client.version>
         <clogging.version>4.1.8</clogging.version>
-        <credis.version>3.1.7</credis.version>
+        <credis.version>4.0.10</credis.version>
         <qconfig.sso.version>1.0.7-SNAPSHOT</qconfig.sso.version>
-        <qunaer.common.version>9.0.9</qunaer.common.version>
-        <qconfig.client.version>1.4.4</qconfig.client.version>
+        <qunaer.common.version>9.2.37</qunaer.common.version>
+        <qconfig.client.version>1.6.11</qconfig.client.version>
         <qtracer.version>1.2.4</qtracer.version>
         <netty3.version>3.10.5.Final</netty3.version>
         <netty.boringssl.version>2.0.12.Final</netty.boringssl.version>
         <netty4.version>4.1.28.Final</netty4.version>
         <zstd.version>1.3.6-1</zstd.version>
+        <jackson.version>2.10.3</jackson.version>
+
+        <soa.version>2.21.17</soa.version>
+        <vi.version>0.11.33</vi.version>
+        <dal.version>2.3.1</dal.version>
+        <ucs.version>0.3.4</ucs.version>
+        <artemis.version>1.9.6</artemis.version>
+        <caravan.version>1.17.13</caravan.version>
     </properties>
 
     <modules>
@@ -71,6 +79,32 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- jackson -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-annotations</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-core</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-xml</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson.dataformat</groupId>
+                <artifactId>jackson-dataformat-protobuf</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
             <!-- qconfig sso -->
             <dependency>
                 <groupId>com.ctrip.infosec</groupId>
@@ -81,7 +115,20 @@
                         <groupId>com.ctrip.framework</groupId>
                         <artifactId>vi</artifactId>
                     </exclusion>
+                    <exclusion>
+                        <groupId>qunar.tc</groupId>
+                        <artifactId>common-zookeeper</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>qunar.tc.qclient</groupId>
+                        <artifactId>qclient-redis</artifactId>
+                    </exclusion>
                 </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>qunar.common</groupId>
+                <artifactId>common-core</artifactId>
+                <version>${qunaer.common.version}</version>
             </dependency>
             <dependency>
                 <groupId>qunar.common</groupId>
@@ -91,6 +138,11 @@
             <dependency>
                 <groupId>qunar.common</groupId>
                 <artifactId>common-concurrent</artifactId>
+                <version>${qunaer.common.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>qunar.common</groupId>
+                <artifactId>common-core</artifactId>
                 <version>${qunaer.common.version}</version>
             </dependency>
             <dependency>
@@ -301,11 +353,6 @@
                 <version>${zookeeper.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.alibaba</groupId>
-                <artifactId>fastjson</artifactId>
-                <version>${fastjson.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-exec</artifactId>
                 <version>${commons-exec.version}</version>
@@ -329,6 +376,41 @@
             </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-autoconfigure</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-log4j2</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-velocity</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-tomcat</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-aop</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter</artifactId>
+                <version>${spring-boot.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-starter-web</artifactId>
                 <version>${spring-boot.version}</version>
                 <exclusions>
@@ -345,6 +427,17 @@
                         <artifactId>hibernate-validator</artifactId>
                     </exclusion>
                 </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-starter-test</artifactId>
+                <version>${spring-boot.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-logging-juli</artifactId>
+                <version>${tomcat.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.lmax</groupId>
@@ -412,7 +505,7 @@
             <dependency>
                 <groupId>org.unidal.framework</groupId>
                 <artifactId>test-framework</artifactId>
-                <version>${unidal.version}</version>
+                <version>${unidal.test.version}</version>
                 <exclusions>
                     <exclusion>
                         <groupId>org.mortbay.jetty</groupId>
@@ -442,12 +535,160 @@
                 <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
                 <version>${jersey.version}</version>
             </dependency>
+
+            <dependency>
+                <groupId>com.ctriposs.baiji</groupId>
+                <artifactId>baiji-core</artifactId>
+                <version>${soa.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctriposs.baiji</groupId>
+                <artifactId>baiji-rpc-common</artifactId>
+                <version>${soa.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctriposs.baiji</groupId>
+                <artifactId>baiji-rpc-client</artifactId>
+                <version>${soa.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>com.ctrip.framework</groupId>
+                        <artifactId>vi</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>com.ctriposs.baiji</groupId>
+                <artifactId>baiji-rpc-server</artifactId>
+                <version>${soa.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>com.ctrip.framework</groupId>
+                        <artifactId>vi</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>com.ctriposs.baiji</groupId>
+                <artifactId>baiji-rpc-mobile-request-filter</artifactId>
+                <version>${soa.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.framework</groupId>
+                <artifactId>vi</artifactId>
+                <version>${vi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.framework</groupId>
+                <artifactId>vi-core</artifactId>
+                <version>${vi.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.platform</groupId>
+                <artifactId>ctrip-datasource</artifactId>
+                <version>${dal.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.framework.fx</groupId>
+                <artifactId>ucs-client</artifactId>
+                <version>${ucs.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.artemis</groupId>
+                <artifactId>artemis-client</artifactId>
+                <version>${artemis.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.artemis</groupId>
+                <artifactId>artemis-client-ctrip</artifactId>
+                <version>${artemis.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-protobuf</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-ctrip</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-util</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-configuration</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-ribbon</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-common</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.ctrip.soa.caravan</groupId>
+                <artifactId>caravan-hystrix</artifactId>
+                <version>${caravan.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>commons-configuration</groupId>
+                <artifactId>commons-configuration</artifactId>
+                <exclusions>
+                    <exclusion>
+                        <groupId>commons-beanutils</groupId>
+                        <artifactId>commons-beanutils-core</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
     <build>
         <pluginManagement>
             <plugins>
+                <!--For ctrip CI/CD-->
+                <plugin>
+                    <groupId>org.jacoco</groupId>
+                    <artifactId>jacoco-maven-plugin</artifactId>
+                    <version>0.8.4</version>
+                    <executions>
+                        <execution>
+                            <id>prepare-agent</id>
+                            <goals>
+                                <goal>prepare-agent</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>report</id>
+                            <phase>prepare-package</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                        <execution>
+                            <id>post-unit-test</id>
+                            <phase>test</phase>
+                            <goals>
+                                <goal>report</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>2.22.1</version>
+                </plugin>
+
+
                 <plugin>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-maven-plugin</artifactId>
@@ -518,16 +759,22 @@
                     <artifactId>plexus-maven-plugin</artifactId>
                     <version>${unidal.plexus.version}</version>
                 </plugin>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-surefire-plugin</artifactId>
-                    <configuration>
-                        <argLine>-Xmx256m</argLine>
-                    </configuration>
-                </plugin>
             </plugins>
         </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <configuration>
+                    <destFile>target/jacoco.exec</destFile>
+                    <dataFile>target/jacoco.exec</dataFile>
+                    <outputDirectory>target/jacoco</outputDirectory>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
             <plugin>
                 <groupId>pl.project13.maven</groupId>
                 <artifactId>git-commit-id-plugin</artifactId>
@@ -558,6 +805,10 @@
     </build>
 
     <dependencies>
+        <dependency>
+            <groupId>org.apache.tomcat.embed</groupId>
+            <artifactId>tomcat-embed-logging-juli</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-log4j2</artifactId>
@@ -655,6 +906,8 @@
                         <artifactId>coveralls-maven-plugin</artifactId>
                         <version>${coveralls-maven-plugin.version}</version>
                     </plugin>
+
+
                 </plugins>
             </build>
             <repositories>
@@ -686,4 +939,19 @@
             </pluginRepositories>
         </profile>
     </profiles>
+
+    <distributionManagement>
+        <repository>
+            <id>releases</id>
+            <url>
+                http://maven.release.ctripcorp.com/nexus/content/repositories/fxrelease
+            </url>
+        </repository>
+        <snapshotRepository>
+            <id>snapshots</id>
+            <url>
+                http://maven.release.ctripcorp.com/nexus/content/repositories/fxsnapshot
+            </url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>

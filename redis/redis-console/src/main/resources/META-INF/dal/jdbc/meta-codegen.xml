@@ -3,10 +3,12 @@
   <entity name="cluster-tbl" table="CLUSTER_TBL" alias="ct">
     <member name="id" field="id" value-type="long" length="20" nullable="false" key="true" auto-increment="true" />
     <member name="cluster-name" field="cluster_name" value-type="String" length="128" nullable="false" />
+    <member name="cluster-type" field="cluster_type" value-type="String" length="32" nullable="false" />
     <member name="activedc-id" field="activedc_id" value-type="long" length="20" nullable="false" />
     <member name="cluster-description" field="cluster_description" value-type="String" length="1024" nullable="false" />
     <member name="cluster-last-modified-time" field="cluster_last_modified_time" value-type="String" length="40" nullable="false" />
     <member name="status" field="status" value-type="String" length="24" nullable="false" />
+    <member name="migration-event-id" field="migration_event_id" value-type="long" length="20" nullable="false" />
     <member name="data-change-last-time" field="DataChange_LastTime" value-type="Date" nullable="false" />
     <member name="deleted" field="deleted" value-type="boolean" nullable="false" />
     <member name="is-xpipe-interested" field="is_xpipe_interested" value-type="boolean" nullable="false" />
@@ -278,8 +280,10 @@
     <member name="keepercontainer-id" field="keepercontainer_id" value-type="long" length="20" />
     <member name="data-change-last-time" field="DataChange_LastTime" value-type="Date" nullable="false" />
     <member name="deleted" field="deleted" value-type="boolean" nullable="false" />
+    <member name="deleted-at" field="deleted_at" value-type="int" length="10" nullable="false" />
     <var name="key-id" value-type="long" key-member="id" />
     <primary-key name="PRIMARY" members="id" />
+    <index name="ip_port_deleted_at" unique="true" members="redis_ip ASC, redis_port ASC, deleted_at ASC" />
     <index name="DataChange_LastTime" members="DataChange_LastTime ASC" />
     <index name="DcClusterShardId" members="dc_cluster_shard_id ASC" />
     <index name="keeper_active" members="keeper_active ASC" />
@@ -437,6 +441,7 @@
   <entity name="config-tbl" table="config_tbl" alias="ct2">
     <member name="id" field="id" value-type="long" length="20" nullable="false" key="true" auto-increment="true" />
     <member name="key" field="key" value-type="String" length="128" nullable="false" />
+    <member name="sub-key" field="sub_key" value-type="String" length="128" nullable="false" />
     <member name="value" field="value" value-type="String" length="1024" />
     <member name="until" field="until" value-type="Date" nullable="false" />
     <member name="latest-update-user" field="latest_update_user" value-type="String" length="512" />
@@ -446,7 +451,7 @@
     <member name="deleted" field="deleted" value-type="int" length="3" nullable="false" />
     <var name="key-id" value-type="long" key-member="id" />
     <primary-key name="PRIMARY" members="id" />
-    <index name="key" unique="true" members="key ASC" />
+    <index name="key_sub_key" unique="true" members="key ASC, sub_key ASC" />
     <index name="DataChange_LastTime" members="DataChange_LastTime ASC" />
     <readsets>
       <readset name="FULL" all="true" />
@@ -569,6 +574,7 @@
   <entity name="migration-event-tbl" table="migration_event_tbl" alias="met">
     <member name="id" field="id" value-type="long" length="20" nullable="false" key="true" auto-increment="true" />
     <member name="start-time" field="start_time" value-type="Date" nullable="false" />
+    <member name="break" field="break" value-type="boolean" nullable="false" />
     <member name="operator" field="operator" value-type="String" length="128" nullable="false" />
     <member name="event-tag" field="event_tag" value-type="String" length="150" nullable="false" />
     <member name="data-change-last-time" field="DataChange_LastTime" value-type="Date" nullable="false" />
@@ -690,7 +696,7 @@
   <entity name="proxy-tbl" table="proxy_tbl" alias="pt">
     <member name="id" field="id" value-type="long" length="20" nullable="false" key="true" auto-increment="true" />
     <member name="dc-id" field="dc_id" value-type="long" length="20" nullable="false" />
-    <member name="uri" field="uri" value-type="String" length="20" nullable="false" />
+    <member name="uri" field="uri" value-type="String" length="256" nullable="false" />
     <member name="active" field="active" value-type="boolean" nullable="false" />
     <member name="monitor-active" field="monitor_active" value-type="boolean" nullable="false" />
     <member name="data-change-last-time" field="DataChange_LastTime" value-type="Date" nullable="false" />

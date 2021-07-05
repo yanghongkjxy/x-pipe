@@ -1,8 +1,8 @@
 package com.ctrip.xpipe.redis.console.healthcheck.nonredis.migration;
 
-import com.ctrip.xpipe.redis.console.AbstractConsoleH2DbTest;
-import com.ctrip.xpipe.redis.console.alert.ALERT_TYPE;
-import com.ctrip.xpipe.redis.console.alert.AlertManager;
+import com.ctrip.xpipe.redis.console.AbstractConsoleDbTest;
+import com.ctrip.xpipe.redis.checker.alert.ALERT_TYPE;
+import com.ctrip.xpipe.redis.checker.alert.AlertManager;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
@@ -15,16 +15,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import java.util.Date;
-import java.util.concurrent.TimeUnit;
-
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class MigrationSystemAvailableCheckTest extends AbstractConsoleH2DbTest {
+public class MigrationSystemAvailableCheckTest extends AbstractConsoleDbTest {
 
     @Mock
     private DcService dcService;
@@ -70,7 +65,7 @@ public class MigrationSystemAvailableCheckTest extends AbstractConsoleH2DbTest {
 
     @Test
     public void testGetIntervalMilli() {
-        Assert.assertEquals(3000, check.getIntervalMilli());
+        Assert.assertEquals(30000, check.getIntervalMilli());
     }
 
     @Test

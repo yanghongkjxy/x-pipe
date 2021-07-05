@@ -2,9 +2,10 @@ package com.ctrip.xpipe.redis.keeper;
 
 import com.ctrip.xpipe.api.cluster.LeaderElectorManager;
 import com.ctrip.xpipe.redis.core.entity.*;
-import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
+import com.ctrip.xpipe.redis.core.protocal.MASTER_STATE;
 import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.KeeperResourceManager;
 import com.ctrip.xpipe.redis.keeper.impl.DefaultRedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.spring.KeeperContextConfig;
 import org.junit.Before;
@@ -14,6 +15,7 @@ import org.xml.sax.SAXException;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.TimeoutException;
 
 /**
  * @author wenchao.meng
@@ -22,11 +24,9 @@ import java.io.IOException;
  */
 public class AbstractRedisKeeperContextTest extends AbstractRedisKeeperTest {
 
-	protected MetaServerKeeperService  metaService;
-	
 	protected KeeperConfig  keeperConfig;
 
-	private ProxyResourceManager proxyResourceManager;
+	private KeeperResourceManager resourceManager;
 	
 	private String keeperConfigFile = "keeper6666.xml";
 
@@ -37,9 +37,8 @@ public class AbstractRedisKeeperContextTest extends AbstractRedisKeeperTest {
 		
 		doIdcInit();
 		
-		metaService = getRegistry().getComponent(MetaServerKeeperService.class);
 		keeperConfig = getRegistry().getComponent(KeeperConfig.class);
-		proxyResourceManager = getRegistry().getComponent(ProxyResourceManager.class);
+		resourceManager = getRegistry().getComponent(KeeperResourceManager.class);
 		
 	}
 	
@@ -80,8 +79,9 @@ public class AbstractRedisKeeperContextTest extends AbstractRedisKeeperTest {
 	}
 
 	protected RedisKeeperServer createRedisKeeperServer(KeeperConfig keeperConfig) throws Exception {
-		
-		return createRedisKeeperServer(createKeeperMeta(), keeperConfig, metaService, getReplicationStoreManagerBaseDir());
+
+		KeeperMeta keeperMeta = createKeeperMeta();
+		return createRedisKeeperServer(keeperMeta, keeperConfig, getReplicationStoreManagerBaseDir(keeperMeta));
 	}
 	
 	protected RedisKeeperServer createRedisKeeperServer() throws Exception {
@@ -89,18 +89,13 @@ public class AbstractRedisKeeperContextTest extends AbstractRedisKeeperTest {
 		return createRedisKeeperServer(createKeeperMeta());
 	}
 
-	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeperMeta) throws Exception {
-
-		return createRedisKeeperServer(keeperMeta, metaService);
-	}
-	
-	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper, MetaServerKeeperService metaService) throws Exception {
-		return createRedisKeeperServer(keeper, metaService, getReplicationStoreManagerBaseDir());
+	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper) throws Exception {
+		return createRedisKeeperServer(keeper, getReplicationStoreManagerBaseDir(keeper));
 	}
 
-	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper, MetaServerKeeperService metaService, File baseDir) throws Exception {
+	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper, File baseDir) throws Exception {
 
-		return createRedisKeeperServer(keeper, getKeeperConfig(), metaService, baseDir);
+		return createRedisKeeperServer(keeper, getKeeperConfig(), baseDir);
 
 	}
 
@@ -108,15 +103,19 @@ public class AbstractRedisKeeperContextTest extends AbstractRedisKeeperTest {
 		return keeperConfig;
 	}
 
-	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper, KeeperConfig keeperConfig, MetaServerKeeperService metaService, File baseDir) throws Exception {
+	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper, KeeperConfig keeperConfig, File baseDir) throws Exception {
 
-		return createRedisKeeperServer(keeper, keeperConfig, metaService, baseDir, getRegistry().getComponent(LeaderElectorManager.class));
+		return createRedisKeeperServer(keeper, keeperConfig, baseDir, getRegistry().getComponent(LeaderElectorManager.class));
 	}
 
 	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeper, KeeperConfig keeperConfig,
-			MetaServerKeeperService metaService, File baseDir, LeaderElectorManager leaderElectorManager) {
-		return new DefaultRedisKeeperServer(keeper, keeperConfig, baseDir, metaService, leaderElectorManager,
-				createkeepersMonitorManager(), proxyResourceManager);
+			File baseDir, LeaderElectorManager leaderElectorManager) {
+		return new DefaultRedisKeeperServer(keeper, keeperConfig, baseDir, leaderElectorManager,
+				createkeepersMonitorManager(), getResourceManager());
+	}
+
+	protected KeeperResourceManager getResourceManager() {
+		return resourceManager;
 	}
 
 	protected RedisMeta createRedisMeta() {
@@ -131,6 +130,11 @@ public class AbstractRedisKeeperContextTest extends AbstractRedisKeeperTest {
 		redisMeta.setPort(port);
 		return redisMeta;
 	}
+
+	protected void waitRedisKeeperServerConnected(RedisKeeperServer redisKeeperServer) throws TimeoutException {
+		waitConditionUntilTimeOut(()->{return redisKeeperServer.getRedisMaster().getMasterState() == MASTER_STATE.REDIS_REPL_CONNECTED;});
+	}
+
 
 	@Override
 	protected String getXpipeMetaConfigFile() {

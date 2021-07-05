@@ -6,14 +6,13 @@ import com.ctrip.xpipe.api.migration.OuterClientService;
 import com.ctrip.xpipe.command.AbstractCommand;
 import com.ctrip.xpipe.command.CommandRetryWrapper;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
-import com.ctrip.xpipe.redis.console.controller.api.RetMessage;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
 import com.ctrip.xpipe.redis.console.job.retry.RetryCondition;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.DcTbl;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
 import com.ctrip.xpipe.redis.console.service.migration.CheckMigrationCommandBuilder;
-import com.ctrip.xpipe.redis.console.service.migration.exception.NoResponseException;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.exception.NoResourceException;
 import com.ctrip.xpipe.redis.core.metaserver.META_SERVER_SERVICE;
@@ -205,7 +204,7 @@ public class DefaultCheckMigrationCommandBuilder extends AbstractService impleme
                     }
                 } catch (Exception e) {
                     logger.error("[CheckMetaServerCommand][{}][{}]", clusterName, metaServerAddress, e);
-                    throw new NoResponseException(String.format("MetaServer: %s", metaServerAddress), e);
+//                    throw new NoResponseException(String.format("MetaServer: %s", metaServerAddress), e);
                 }
             }
             return Lists.newArrayList(result);
@@ -215,6 +214,8 @@ public class DefaultCheckMigrationCommandBuilder extends AbstractService impleme
         protected RetMessage validate(List<String> response) {
             if(response.size() == targetMetaServers.size()) {
                 return RetMessage.createSuccessMessage();
+            } else if(response.isEmpty()) {
+                return RetMessage.createFailMessage("All MetaServers Down");
             }
             List<String> problemMetaServers = Lists.newArrayList(targetMetaServers);
 
@@ -223,7 +224,7 @@ public class DefaultCheckMigrationCommandBuilder extends AbstractService impleme
             for(String addr : problemMetaServers) {
                 sb.append(addr).append(",");
             }
-            return RetMessage.createFailMessage(sb.toString());
+            return RetMessage.createWarningMessage(sb.toString());
         }
 
     }

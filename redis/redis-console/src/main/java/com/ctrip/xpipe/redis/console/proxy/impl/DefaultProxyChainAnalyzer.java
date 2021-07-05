@@ -5,12 +5,12 @@ import com.ctrip.xpipe.api.endpoint.Endpoint;
 import com.ctrip.xpipe.command.AbstractCommand;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.endpoint.HostPort;
-import com.ctrip.xpipe.redis.console.healthcheck.crossdc.SafeLoop;
-import com.ctrip.xpipe.redis.console.model.DcClusterShard;
+import com.ctrip.xpipe.lifecycle.AbstractStartStoppable;
+import com.ctrip.xpipe.redis.checker.healthcheck.leader.SafeLoop;
+import com.ctrip.xpipe.redis.checker.model.DcClusterShard;
 import com.ctrip.xpipe.redis.console.proxy.*;
-import com.ctrip.xpipe.redis.console.resources.MetaCache;
 import com.ctrip.xpipe.redis.console.service.RouteService;
-import com.ctrip.xpipe.redis.console.spring.ConsoleContextConfig;
+import com.ctrip.xpipe.redis.core.meta.MetaCache;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpoint;
 import com.ctrip.xpipe.spring.AbstractProfile;
 import com.ctrip.xpipe.tuple.Pair;
@@ -25,22 +25,22 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
 import javax.annotation.Resource;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static com.ctrip.xpipe.spring.AbstractSpringConfigContext.GLOBAL_EXECUTOR;
+import static com.ctrip.xpipe.spring.AbstractSpringConfigContext.SCHEDULED_EXECUTOR;
+
 @Component
 @Lazy
 @Profile(AbstractProfile.PROFILE_NAME_PRODUCTION)
-public class DefaultProxyChainAnalyzer implements ProxyChainAnalyzer {
+public class DefaultProxyChainAnalyzer extends AbstractStartStoppable implements ProxyChainAnalyzer {
 
     private Logger logger = LoggerFactory.getLogger(DefaultProxyChainAnalyzer.class);
 
@@ -60,37 +60,17 @@ public class DefaultProxyChainAnalyzer implements ProxyChainAnalyzer {
     @Autowired
     private RouteService routeService;
 
-    @Resource(name = ConsoleContextConfig.GLOBAL_EXECUTOR)
+    @Resource(name = GLOBAL_EXECUTOR)
     private ExecutorService executors;
 
-    @Resource(name = ConsoleContextConfig.SCHEDULED_EXECUTOR)
+    @Resource(name = SCHEDULED_EXECUTOR)
     private ScheduledExecutorService scheduled;
 
-    private ScheduledFuture future;
+    private ScheduledFuture<?> future;
 
     private AtomicBoolean taskTrigger = new AtomicBoolean(false);
 
-    public static final int ANALYZE_INTERVAL = Integer.parseInt(System.getProperty("console.proxy.chain.analyze.interval", "1000"));
-
-    @PostConstruct
-    public void postConstruct() {
-        future = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
-            @Override
-            protected void doRun() throws Exception {
-                if(!taskTrigger.get()) {
-                    return;
-                }
-                fullUpdate();
-            }
-        }, Math.min(5, ANALYZE_INTERVAL * 5), ANALYZE_INTERVAL, TimeUnit.MILLISECONDS);
-    }
-
-    @PreDestroy
-    public void preDestroy() {
-        if(future != null) {
-            future.cancel(true);
-        }
-    }
+    public static final int ANALYZE_INTERVAL = Integer.parseInt(System.getProperty("console.proxy.chain.analyze.interval", "30000"));
 
     @Override
     public ProxyChain getProxyChain(String backupDcId, String clusterId, String shardId) {
@@ -174,13 +154,51 @@ public class DefaultProxyChainAnalyzer implements ProxyChainAnalyzer {
     }
 
     @Override
-    public void isCrossDcLeader() {
+    public void isleader() {
         taskTrigger.set(true);
+        stopAndStart();
+    }
+
+    private void stopAndStart() {
+        try {
+            stop();
+            start();
+        } catch (Exception e) {
+            logger.error("[notLeader]", e);
+        }
     }
 
     @Override
-    public void notCrossDcLeader() {
+    public void notLeader() {
         taskTrigger.set(false);
+        try {
+            stop();
+        } catch (Exception e) {
+            logger.error("[notLeader]", e);
+        }
+    }
+
+    @Override
+    protected void doStart() throws Exception {
+        future = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
+            @Override
+            protected void doRun() throws Exception {
+                if(!taskTrigger.get()) {
+                    return;
+                }
+                fullUpdate();
+            }
+        }, Math.min(30000, ANALYZE_INTERVAL), ANALYZE_INTERVAL, TimeUnit.MILLISECONDS);
+    }
+
+    @Override
+    protected void doStop() throws Exception {
+        if(future != null) {
+            future.cancel(true);
+            future = null;
+        }
+        reverseMap.clear();
+        chains.clear();
     }
 
     private final class ProxyChainBuilder extends AbstractCommand<Map<SourceDest, List<TunnelInfo>>> {

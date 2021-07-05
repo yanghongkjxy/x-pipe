@@ -1,13 +1,12 @@
 package com.ctrip.xpipe.redis.console.service.migration;
 
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
+import com.ctrip.xpipe.redis.console.controller.api.migrate.meta.MigrationProgress;
 import com.ctrip.xpipe.redis.console.healthcheck.nonredis.migration.MigrationSystemAvailableChecker;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
 import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
-import com.ctrip.xpipe.redis.console.model.MigrationClusterModel;
-import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
-import com.ctrip.xpipe.redis.console.model.MigrationEventTbl;
-import com.ctrip.xpipe.redis.console.model.MigrationShardTbl;
+import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.service.migration.exception.*;
 import com.ctrip.xpipe.redis.console.service.migration.impl.MigrationRequest;
 import com.ctrip.xpipe.redis.console.service.migration.impl.TryMigrateResult;
@@ -16,6 +15,22 @@ import java.util.Date;
 import java.util.List;
 
 public interface MigrationService {
+
+    long countAll();
+
+    long countAllByCluster(long clusterId);
+
+    long countAllByOperator(String operator);
+
+    long countAllByStatus(String status);
+
+    List<MigrationModel> find(long size, long offset);
+
+    List<MigrationModel> findByCluster(long clusterId, long size, long offset);
+
+    List<MigrationModel> findByOperator(String operator, long size, long offset);
+
+    List<MigrationModel> findByStatus(String status, long size, long offset);
 
     MigrationEventTbl find(long id);
 
@@ -37,13 +52,13 @@ public interface MigrationService {
 
     void updateMigrationShardLogById(long id, String log);
 
-    TryMigrateResult tryMigrate(String clusterName, String fromIdc, String toIdc) throws ClusterNotFoundException, ClusterActiveDcNotRequest, ClusterMigratingNow, ToIdcNotFoundException, MigrationSystemNotHealthyException;
+    TryMigrateResult tryMigrate(String clusterName, String fromIdc, String toIdc) throws ClusterNotFoundException, MigrationNotSupportException, ClusterActiveDcNotRequest, ClusterMigratingNow, ToIdcNotFoundException, MigrationSystemNotHealthyException, ClusterMigratingNowButMisMatch;
 
     Long createMigrationEvent(MigrationRequest request);
 
     void continueMigrationCluster(long eventId, long clusterId);
 
-    void continueMigrationEvent(long eventId);
+    void continueMigrationEvent(long eventId) throws Exception;
 
     MigrationEvent getMigrationEvent(long eventId);
 
@@ -53,9 +68,16 @@ public interface MigrationService {
 
     MigrationCluster rollbackMigrationCluster(long eventId, String clusterName) throws ClusterNotFoundException;
 
-    void forcePublishMigrationCluster(long eventId, long clusterId);
+    void forceProcessMigrationCluster(long eventId, long clusterId);
 
-    void forceEndMigrationClsuter(long eventId, long clusterId);
+    void forceEndMigrationCluster(long eventId, long clusterId);
 
     MigrationSystemAvailableChecker.MigrationSystemAvailability getMigrationSystemAvailability();
+
+    RetMessage getMigrationSystemHealth();
+
+    MigrationProgress buildMigrationProgress(int hours);
+
+    void updateMigrationStatus(MigrationCluster migrationCluster, MigrationStatus status);
+
 }

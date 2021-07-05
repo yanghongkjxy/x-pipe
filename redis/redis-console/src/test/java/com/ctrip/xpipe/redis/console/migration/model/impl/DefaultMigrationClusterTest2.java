@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.console.migration.model.impl;
 
+import com.ctrip.xpipe.command.DefaultRetryCommandFactory;
 import com.ctrip.xpipe.redis.console.exception.ServerException;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
 import com.ctrip.xpipe.redis.console.migration.status.ClusterStatus;
@@ -8,12 +9,16 @@ import com.ctrip.xpipe.redis.console.migration.status.migration.MigrationCheckin
 import com.ctrip.xpipe.redis.console.migration.status.migration.MigrationMigratingState;
 import com.ctrip.xpipe.redis.console.migration.status.migration.MigrationPublishState;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
+import com.ctrip.xpipe.redis.console.model.DcTbl;
 import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
-import com.ctrip.xpipe.redis.console.service.ClusterService;
-import com.ctrip.xpipe.redis.console.service.DcService;
-import com.ctrip.xpipe.redis.console.service.RedisService;
-import com.ctrip.xpipe.redis.console.service.ShardService;
+import com.ctrip.xpipe.redis.console.service.*;
+import com.ctrip.xpipe.redis.console.service.meta.ClusterMetaService;
+import com.ctrip.xpipe.redis.console.service.meta.RedisMetaService;
+import com.ctrip.xpipe.redis.console.service.meta.impl.ClusterMetaServiceImpl;
 import com.ctrip.xpipe.redis.console.service.migration.MigrationService;
+import com.ctrip.xpipe.redis.console.service.vo.DcMetaBuilder;
+import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
+import com.ctrip.xpipe.redis.core.entity.DcMeta;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -29,8 +34,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.mockito.Matchers.*;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * @author chen.zhu
@@ -60,6 +64,15 @@ public class DefaultMigrationClusterTest2 {
     @Mock
     private MigrationService migrationService;
 
+    @Mock
+    private RedisMetaService redisMetaService;
+    @Mock
+    private ClusterMetaService clusterMetaService;
+    @Mock
+    private DcClusterService dcClusterService;
+    @Mock
+    private DcClusterShardService dcClusterShardService;
+
     private ClusterTbl clusterTbl = new ClusterTbl();
 
     private MigrationClusterTbl migrationClusterTbl = new MigrationClusterTbl();
@@ -81,28 +94,6 @@ public class DefaultMigrationClusterTest2 {
                 dcService, clusterService, shardService, redisService, migrationService);
     }
 
-    @Test
-    public void testUpdateStorageClusterStatus() throws Exception {
-
-        AtomicInteger counter = new AtomicInteger(1);
-        when(clusterService.find(anyString())).thenReturn(clusterTbl);
-        doAnswer(new Answer() {
-            @Override
-            public Void answer(InvocationOnMock invocation) throws Throwable {
-                int currentCounter = counter.getAndIncrement();
-                if(currentCounter % 3 == 0) {
-                    clusterTbl.setStatus(((ClusterStatus) invocation.getArguments()[1]).toString());
-                }
-                return null;
-            }
-        }).when(clusterService).updateStatusById(anyLong(), any());
-
-        migrationClusterTbl.setStatus("Checking");
-        migrationCluster.updateStorageClusterStatus();
-
-        Assert.assertEquals(MigrationStatus.Checking.getClusterStatus().toString(), clusterTbl.getStatus());
-    }
-
     @Test(expected = ServerException.class)
     public void testUpdateStat() throws Exception {
         AtomicInteger counter = new AtomicInteger(1);
@@ -116,7 +107,7 @@ public class DefaultMigrationClusterTest2 {
                 }
                 return null;
             }
-        }).when(clusterService).updateStatusById(anyLong(), any());
+        }).when(clusterService).updateStatusById(anyLong(), any(), anyLong());
 
         migrationCluster.updateStat(new MigrationCheckingState(migrationCluster));
 
@@ -135,7 +126,7 @@ public class DefaultMigrationClusterTest2 {
                 }
                 return null;
             }
-        }).when(clusterService).updateStatusById(anyLong(), any());
+        }).when(clusterService).updateStatusById(anyLong(), any(), anyLong());
 
         migrationCluster.updateStat(new MigrationMigratingState(migrationCluster));
 
@@ -154,10 +145,56 @@ public class DefaultMigrationClusterTest2 {
                 }
                 return null;
             }
-        }).when(clusterService).updateStatusById(anyLong(), any());
+        }).when(clusterService).updateStatusById(anyLong(), any(), anyLong());
 
         migrationCluster.updateStat(new MigrationPublishState(migrationCluster));
 
+    }
+
+    @Test
+    public void testCurrentPrimaryDcWhenPublish() {
+        ClusterTbl clusterTbl = new ClusterTbl().setId(1000L).setActivedcId(1).setStatus(ClusterStatus.Lock.name());
+        when(clusterService.find(anyString())).thenReturn(clusterTbl);
+        migrationCluster = spy(migrationCluster);
+//        doNothing().when(migrationCluster).load
+        doAnswer(new Answer() {
+            @Override
+            public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
+                ClusterStatus clusterStatus = (ClusterStatus) invocationOnMock.getArguments()[1];
+                clusterTbl.setStatus(clusterStatus.name());
+                return null;
+            }
+        }).when(clusterService).updateStatusById(anyLong(), any(), anyLong());
+
+        migrationCluster.updateStat(new MigrationPublishState(migrationCluster));
+
+
+        clusterMetaService.getClusterMetaCurrentPrimaryDc(new DcTbl().setId(2), clusterTbl);
+    }
+
+    @Test
+    public void testOther() {
+        when(clusterService.find(anyString())).thenReturn(clusterTbl);
+        clusterTbl.setActivedcId(1);
+        migrationClusterTbl.setDestinationDcId(2);
+        doAnswer(new Answer() {
+            @Override
+            public Void answer(InvocationOnMock invocation) throws Throwable {
+                clusterTbl.setStatus(((ClusterStatus) invocation.getArguments()[1]).toString());
+                return null;
+            }
+        }).when(clusterService).updateStatusById(anyLong(), any(), anyLong());
+
+
+        migrationCluster.updateStat(new MigrationPublishState(migrationCluster));
+
+        when(migrationService
+                .findLatestUnfinishedMigrationCluster(anyLong())).thenReturn(migrationClusterTbl);
+
+        ClusterMetaService clusterMetaService1 = new ClusterMetaServiceImpl();
+        ((ClusterMetaServiceImpl) clusterMetaService1).setMigrationService(migrationService);
+        long id = clusterMetaService1.getClusterMetaCurrentPrimaryDc(new DcTbl().setId(2), clusterTbl);
+        Assert.assertEquals(2, id);
     }
 
 }

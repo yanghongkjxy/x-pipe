@@ -1,13 +1,14 @@
 package com.ctrip.xpipe.redis.console.controller.consoleportal;
 
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
 import com.ctrip.xpipe.redis.console.healthcheck.nonredis.cluster.ClusterHealthMonitorManager;
 import com.ctrip.xpipe.redis.console.healthcheck.nonredis.cluster.ClusterHealthState;
 import com.ctrip.xpipe.redis.console.model.ClusterModel;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.DcClusterTbl;
 import com.ctrip.xpipe.redis.console.model.DcTbl;
-import com.ctrip.xpipe.redis.console.model.consoleportal.ClusterListClusterModel;
+import com.ctrip.xpipe.redis.console.model.consoleportal.ClusterListUnhealthyClusterModel;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @author zhangle
@@ -44,6 +46,16 @@ public class ClusterController extends AbstractConsoleController {
         return valueOrDefault(ClusterTbl.class, clusterService.findClusterAndOrg(clusterName));
     }
 
+    @RequestMapping(value = "/clusters/by/names", method = RequestMethod.POST)
+    public List<ClusterTbl> loadClusters(@RequestBody List<String> clusterNames) {
+        List<ClusterTbl> clusters = clusterNames.stream()
+                .map(name -> clusterService.findClusterAndOrg(name))
+                .collect(Collectors.toList());
+        List<Long> clusterIds = clusters.stream().map(ClusterTbl::getId).collect(Collectors.toList());
+        List<DcClusterTbl> dcClusters = dcClusterService.findByClusterIds(clusterIds);
+        return valueOrEmptySet(ClusterTbl.class, joinClusterAndDcCluster(clusters, dcClusters));
+    }
+
     @RequestMapping(value = "/clusters/all", method = RequestMethod.GET)
     public List<ClusterTbl> findAllClusters(@RequestParam(required = false) String activeDcName) {
         if (StringUtil.isEmpty(activeDcName)) {
@@ -69,8 +81,31 @@ public class ClusterController extends AbstractConsoleController {
     }
 
     @RequestMapping(value = "/clusters/unhealthy", method = RequestMethod.GET)
-    public List<ClusterListClusterModel> findUnhealthyClusters() {
-        return valueOrEmptySet(ClusterListClusterModel.class, clusterService.findUnhealthyClusters());
+    public List<ClusterListUnhealthyClusterModel> findUnhealthyClusters() {
+        return valueOrEmptySet(ClusterListUnhealthyClusterModel.class, clusterService.findUnhealthyClusters());
+    }
+
+    @RequestMapping(value = "/clusters/error/migrating", method = RequestMethod.GET)
+    public List<ClusterTbl> findErrorMigratingClusters() {
+        return valueOrEmptySet(ClusterTbl.class, clusterService.findErrorMigratingClusters());
+    }
+
+    @RequestMapping(value = "/clusters/migrating", method = RequestMethod.GET)
+    public List<ClusterTbl> findMigratingClusters() {
+        return valueOrEmptySet(ClusterTbl.class, clusterService.findMigratingClusters());
+    }
+
+    @RequestMapping(value = "/clusters/reset/status", method = RequestMethod.POST)
+    public RetMessage resetClustersStatus(@RequestBody List<Long> ids) {
+        if (ids.size() == 0) {
+            return RetMessage.createFailMessage("zero clusters to reset.");
+        }
+        try {
+            clusterService.resetClustersStatus(ids);
+            return RetMessage.createSuccessMessage();
+        } catch (Exception e) {
+            return RetMessage.createFailMessage(e.getMessage());
+        }
     }
 
     private List<ClusterTbl> joinClusterAndDcCluster(List<ClusterTbl> clusters, List<DcClusterTbl> dcClusters) {
@@ -133,7 +168,7 @@ public class ClusterController extends AbstractConsoleController {
     @RequestMapping(value = "/clusters/activeDc/{dcName}", method = RequestMethod.GET)
     public List<ClusterTbl> findClustersByActiveDcName(@PathVariable String dcName){
         logger.info("[findClustersByActiveDcName]dcName: {}", dcName);
-        return clusterService.findAllClustersByDcName(dcName);
+        return clusterService.findActiveClustersByDcName(dcName);
     }
 
     @RequestMapping(value = "/clusters/master/unhealthy/{level}", method = RequestMethod.GET)
@@ -149,6 +184,12 @@ public class ClusterController extends AbstractConsoleController {
             return clusterHealthMonitorManager.getWarningClusters(state);
         }
         return Sets.newHashSet();
+    }
+
+    @RequestMapping(value = "/clusters/keepercontainer/{containerId}", method = RequestMethod.GET)
+    public List<ClusterTbl> findClusterByKeeperContainer(@PathVariable Long containerId) {
+        if (null == containerId || containerId <= 0) return Collections.emptyList();
+        return clusterService.findAllClusterByKeeperContainer(containerId);
     }
 
 }

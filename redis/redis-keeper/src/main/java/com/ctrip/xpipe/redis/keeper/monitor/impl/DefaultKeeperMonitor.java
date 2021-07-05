@@ -1,11 +1,9 @@
 package com.ctrip.xpipe.redis.keeper.monitor.impl;
 
+import com.ctrip.xpipe.lifecycle.AbstractStartStoppable;
 import com.ctrip.xpipe.redis.core.store.CommandStore;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
-import com.ctrip.xpipe.redis.keeper.monitor.CommandStoreDelay;
-import com.ctrip.xpipe.redis.keeper.monitor.KeeperMonitor;
-import com.ctrip.xpipe.redis.keeper.monitor.KeeperStats;
-import com.ctrip.xpipe.redis.keeper.monitor.ReplicationStoreStats;
+import com.ctrip.xpipe.redis.keeper.monitor.*;
 
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -14,9 +12,11 @@ import java.util.concurrent.ScheduledExecutorService;
  *
  * Feb 20, 2017
  */
-public class DefaultKeeperMonitor implements KeeperMonitor{
+public class DefaultKeeperMonitor extends AbstractStartStoppable implements KeeperMonitor{
 
 	private KeeperStats keeperStats;
+
+	private MasterStats masterStats = new DefaultMasterStats();
 	
 	private ReplicationStoreStats replicationStoreStats = new DefaultReplicationStoreStats();
 	
@@ -24,7 +24,7 @@ public class DefaultKeeperMonitor implements KeeperMonitor{
 	
 	public DefaultKeeperMonitor(RedisKeeperServer redisKeeperServer, ScheduledExecutorService scheduled) {
 		this.redisKeeperServer = redisKeeperServer;
-		this.keeperStats = new DefaultKeeperStats(scheduled);
+		this.keeperStats = new DefaultKeeperStats(redisKeeperServer.getShardId(), scheduled);
 	}
 	
 	@Override
@@ -42,4 +42,18 @@ public class DefaultKeeperMonitor implements KeeperMonitor{
 		return replicationStoreStats;
 	}
 
+	@Override
+	public MasterStats getMasterStats() {
+		return masterStats;
+	}
+
+	@Override
+	protected void doStart() throws Exception {
+		this.keeperStats.start();
+	}
+
+	@Override
+	protected void doStop() throws Exception {
+		this.keeperStats.stop();
+	}
 }

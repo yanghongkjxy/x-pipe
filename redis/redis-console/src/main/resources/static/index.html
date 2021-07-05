@@ -13,19 +13,19 @@
 <link rel="stylesheet" href="./vendor/css/ace-skins.min.css" />
 <link rel="stylesheet" href="./vendor/css/ace-rtl.min.css" />
 <link rel="stylesheet" href="./vendor/css/ace-ie.min.css" />
-<link rel="stylesheet" href="./vendor/angular/angular-toastr-1.4.1.min.css" />
+<link rel="stylesheet" href="./vendor/angular/angular-toastr.min.css" />
 <link rel="stylesheet" href="./vendor/css/ng-table.min.css" />
 
 <!-- page specific plugin styles -->
 <link rel="stylesheet" href="./vendor/css/jquery-ui.custom.min.css" />
 <link rel="stylesheet" href="./vendor/css/chosen.css" />
 
-<link rel="stylesheet" href="styles/commons.css" />
-<link rel="stylesheet" href="styles/customized.css" />
-<link rel="stylesheet" href="./vendor/angular/angular-material.min.css">
+	<link rel="stylesheet" href="styles/commons.css" />
+	<link rel="stylesheet" href="styles/customized.css" />
+	<link rel="stylesheet" href="./vendor/angular/angular-material.min.css">
 </head>
 
-<body class="no-skin" ng-app="index">
+<body class="no-skin">
 	<ul>
 		<li>
 	<div id="navbar" class="navbar navbar-default navbar-fixed-top">
@@ -47,6 +47,11 @@
 						</a>
 					</li>
 					<li class="orange">
+						<a ui-sref="keepercontainer_list({})" title="KeeperContainer列表">
+							<i class="ace-icon fa fa-list"></i> <span>KeeperContainer列表</span>
+						</a>
+					</li>
+					<li class="orange">
 						<a ui-sref="proxy_overview({})" title="Proxy列表">
 							<i class="ace-icon fa fa-list"></i> <span>Proxy列表</span>
 						</a>
@@ -54,6 +59,11 @@
 					<li class="grey">
 						<a ui-sref="cluster_list({clusterName:'',dcName:'',type:''})" title="Cluster列表">
 							<i class="ace-icon fa fa-info-circle"></i> <span>Cluster列表</span>
+						</a>
+					</li>
+					<li class="grey">
+						<a ui-sref="shard_list({})" title="问题Shard列表">
+							<i class="ace-icon fa fa-info-circle"></i> <span>问题Shard列表</span>
 						</a>
 					</li>
 					
@@ -171,62 +181,11 @@
 
 	<script src="./vendor/js/lodash.min.js"></script>
 
-	<script src="./vendor/angular/angular.min.js"></script>
-	<script src="./vendor/angular/angular-resource.min.js"></script>
-	<script src="./vendor/angular/angular-ui-router.min.js"></script>
-	<script src="./vendor/angular/angular-toastr-1.4.1.tpls.min.js"></script>
-	<script src="./vendor/angular/ui-bootstrap-tpls-2.0.2.min.js"></script>
-	<script src="./vendor/angular/angular-animate.min.js"></script>
-	<script src="./vendor/angular/angular-aria.min.js"></script>
-	<script src="./vendor/angular/angular-messages.min.js"></script>
-	<script src="./vendor/angular/angular-touch.min.js"></script>
-	<script src="./vendor/angular/ng-table.min.js"></script>
-	<script src="./vendor/angular/angular-material.min.js"></script>
-	<script src="./vendor/angular/angular-chosen.min.js"></script>
-
 	<script src="./vendor/js/typeahead-bs2.min.js"></script>
 	<script src="./vendor/js/jquery.dataTables.min.js"></script>
 	<script src="./vendor/js/jquery.dataTables.bootstrap.js"></script>
 
-	<script src="./scripts/app.js"></script>
-
-	<script src="./scripts/services/DcService.js"></script>
-	<script src="./scripts/services/ClusterService.js"></script>
-	<script src="./scripts/services/ProxyService.js"></script>
-	<script src="./scripts/services/TunnelService.js"></script>
-	<script src="scripts/services/ProxyPingService.js"></script>
-	<script src="./scripts/services/ShardService.js"></script>
-	<script src="./scripts/services/RedisService.js"></script>
-	<script src="./scripts/services/KeeperContainerService.js"></script>
-	<script src="./scripts/services/UserService.js"></script>
-	<script src="./scripts/services/ConfigService.js"></script>
-	<script src="./scripts/services/MigrationService.js"></script>
-	<script src="./scripts/services/SentinelService.js"></script>
-	<script src="./scripts/services/HealthCheckService.js"></script>
-
-	<script src="scripts/router.js"></script>
-
-	<script src="scripts/AppUtils.js"></script>
-
-	<script src="scripts/directives/confirm.js"></script>
-	<script src="scripts/directives/add-shard.js"></script>
-
-	<script src="scripts/controllers/IndexCtl.js"></script>
-	<script src="scripts/controllers/ClusterDcShardCtl.js"></script>
-	<script src="scripts/controllers/ProxyChainCtl.js"></script>
-	<script src="scripts/controllers/TunnelsCtl.js"></script>
-	<script src="scripts/controllers/ProxyPingCtl.js"></script>
-	<script src="scripts/controllers/ProxyListCtl.js"></script>
-	<script src="scripts/controllers/ClusterFormCtl.js"></script>
-	<script src="scripts/controllers/ClusterListCtl.js"></script>
-	<script src="scripts/controllers/ClusterDcCtl.js"></script>
-	<script src="scripts/controllers/ClusterShardsCtl.js"></script>
-	<script src="scripts/controllers/ClusterDcShardUpdateCtl.js"></script>
-	<script src="scripts/controllers/ActiveDcMigrationIndexCtl.js"></script>
-	<script src="scripts/controllers/ActiveDcMigrationEventListCtl.js"></script>
-	<script src="scripts/controllers/ActiveDcMigrationEventDetailsCtl.js"></script>
-	<script src="scripts/controllers/ActiveDcMigrationEventDetailsContentCtl.js"></script>
-	<script src="scripts/controllers/DcListCtl.js"></script>
+    <script src="./dist/bundle.js?20210527171354"></script>
 
 </body>
 </html>

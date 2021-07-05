@@ -6,7 +6,6 @@ import com.ctrip.xpipe.api.retry.RetryTemplate;
 import com.ctrip.xpipe.command.AbstractCommand;
 import com.ctrip.xpipe.observer.AbstractObservable;
 import com.ctrip.xpipe.redis.console.annotation.DalTransaction;
-import com.ctrip.xpipe.redis.console.exception.ServerException;
 import com.ctrip.xpipe.redis.console.job.retry.RetryCondition;
 import com.ctrip.xpipe.redis.console.job.retry.RetryNTimesOnCondition;
 import com.ctrip.xpipe.redis.console.migration.model.*;
@@ -25,7 +24,6 @@ import com.ctrip.xpipe.utils.VisibleForTesting;
 import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeoutException;
 
 /**
  * @author shyin
@@ -154,27 +152,9 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
 
         logger.info("[updateStat]{}-{}, {} -> {}",
                 migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus(), stat.getStatus());
-
-        this.currentState = stat;
-        try {
-            tryUpdateStartTime(stat.getStatus());
-            updateStorageClusterStatus();
-            updateStorageMigrationClusterStatus();
-        } catch (Exception e) {
-            logger.error("[updateStat] ", e);
-            throw new ServerException(e.getMessage());
-        }
-    }
-
-    private void tryUpdateStartTime(MigrationStatus migrationStatus) {
-        try{
-            if(MigrationStatus.updateStartTime(migrationStatus)){
-                logger.info("[tryUpdateStartTime][doUpdate]{}, {}, {}", migrationCluster.getId(), clusterName(), migrationStatus);
-                getMigrationService().updateMigrationClusterStartTime(migrationCluster.getId(), new Date());
-            }
-        }catch (Exception e){
-            logger.error("[tryUpdateStartTime]" + clusterName(), e);
-        }
+        this.currentState = stat; // update local state even if update db fail
+        this.getMigrationService().updateMigrationStatus(this, stat.getStatus());
+        this.currentState = stat; // avoid local state updating by other thread before real update db with row lock
     }
 
     @Override
@@ -243,59 +223,6 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
         this.outerClientService = outerClientService;
     }
 
-    private void updateStorageMigrationClusterStatus() {
-        MigrationStatus migrationStatus = this.currentState.getStatus();
-        getMigrationService().updateStatusAndEndTimeById(migrationCluster.getId(), migrationStatus, new Date());
-    }
-
-    @VisibleForTesting
-    protected void updateStorageClusterStatus() throws Exception {
-
-        MigrationStatus migrationStatus = this.currentState.getStatus();
-        ClusterStatus clusterStatus = migrationStatus.getClusterStatus();
-
-        logger.info("[updateStat][updatedb]{}, {}", clusterName(), clusterStatus);
-        RetryTemplate<String> retryTemplate = new RetryNTimesOnCondition<>(new RetryCondition.AbstractRetryCondition<String>() {
-            @Override
-            public boolean isSatisfied(String s) {
-                return ClusterStatus.isSameClusterStatus(s, clusterStatus);
-            }
-
-            @Override
-            public boolean isExceptionExpected(Throwable th) {
-                if(th instanceof TimeoutException)
-                    return true;
-                return false;
-            }
-        }, 3);
-        retryTemplate.execute(new AbstractCommand<String>() {
-            @Override
-            protected void doExecute() throws Exception {
-                try {
-                    getClusterService().updateStatusById(clusterId(), clusterStatus);
-                    ClusterTbl newCluster = getClusterService().find(clusterName());
-                    future().setSuccess(newCluster.getStatus());
-                } catch (Exception e) {
-                    future().setFailure(e.getCause());
-                }
-            }
-
-            @Override
-            protected void doReset() {
-
-            }
-
-            @Override
-            public String getName() {
-                return "update cluster status";
-            }
-        });
-
-        ClusterTbl newCluster = getClusterService().find(clusterName());
-        logger.info("[updateStat][getdb]{}, {}", clusterName(), newCluster != null ? newCluster.getStatus() : null);
-    }
-
-
     private long clusterId() {
         return getCurrentCluster().getId();
     }
@@ -318,18 +245,17 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
     }
 
     @Override
-    public void forcePublish() {
-        logger.info("[ForcePublish]{}-{}, {} -> ForcePublish", migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus());
-        if (!(currentState instanceof PartialSuccessState)) {
+    public void forceProcess() {
+        logger.info("[ForceProcess]{}-{}, {} -> ForceProcess", migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus());
+        if (!(currentState instanceof ForceProcessAbleState)) {
             throw new IllegalStateException(String.format("cannot cancel while %s", this.currentState.getStatus()));
         }
-        PartialSuccessState partialSuccessState = (PartialSuccessState) this.currentState;
-        partialSuccessState.forcePublish();
+        ForceProcessAbleState forceProcessAbleState = (ForceProcessAbleState) this.currentState;
+        forceProcessAbleState.updateAndForceProcess();
     }
 
     @Override
     public void forceEnd() {
-
         logger.info("[ForceEnd]{}-{}, {} -> ForceEnd", migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus());
         if (!(currentState instanceof PublishState)) {
             throw new IllegalStateException(String.format("Cannot force end while %s", this.currentState.getStatus()));
@@ -407,5 +333,10 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
     @Override
     public String toString() {
         return String.format("[cluster:%s, state:%s]", clusterName(), currentState);
+    }
+
+    @VisibleForTesting
+    public void setMigrationState(MigrationState state) {
+        this.currentState = state;
     }
 }

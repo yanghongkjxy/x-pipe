@@ -8,13 +8,15 @@ import com.ctrip.xpipe.redis.console.model.ShardModel;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.KeeperAdvancedService;
 import com.ctrip.xpipe.redis.console.service.KeeperBasicInfo;
-import com.ctrip.xpipe.redis.console.service.KeepercontainerService;
+import com.ctrip.xpipe.redis.console.service.KeeperContainerService;
 import com.ctrip.xpipe.redis.core.protocal.RedisProtocol;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedList;
 import java.util.List;
+
+import static com.ctrip.xpipe.redis.core.protocal.RedisProtocol.KEEPER_PORT_DEFAULT;
 
 
 /**
@@ -27,7 +29,7 @@ import java.util.List;
 public class KeepercontainerDcController extends AbstractConsoleController {
 
   @Autowired
-  private KeepercontainerService keepercontainerService;
+  private KeeperContainerService keeperContainerService;
 
   @Autowired
   private KeeperAdvancedService keeperAdvancedService;
@@ -40,7 +42,7 @@ public class KeepercontainerDcController extends AbstractConsoleController {
       @PathVariable String clusterName) {
 
     List<KeepercontainerTbl> keepercontainerTbls =
-         keepercontainerService.findBestKeeperContainersByDcCluster(dcName, clusterName);
+         keeperContainerService.findBestKeeperContainersByDcCluster(dcName, clusterName);
     return keepercontainerTbls;
   }
 
@@ -51,12 +53,10 @@ public class KeepercontainerDcController extends AbstractConsoleController {
 
     logger.debug("[findAvailableKeepers]{}, {}", dcName, shardModel);
 
-    int beginPort = findBeginPort(shardModel);
-
     String clusterName = getShardClusterName(shardModel);
 
     List<KeeperBasicInfo> bestKeepers =
-        keeperAdvancedService.findBestKeepers(dcName, beginPort, (ip, port) -> {
+        keeperAdvancedService.findBestKeepers(dcName, KEEPER_PORT_DEFAULT, (ip, port) -> {
 
           if (shardModel != null && existOnConsole(ip, port, shardModel.getKeepers())) {
             return false;
@@ -80,15 +80,6 @@ public class KeepercontainerDcController extends AbstractConsoleController {
       }
     }
     return false;
-  }
-
-  private int findBeginPort(ShardModel shardModel) {
-
-    int port = RedisProtocol.REDIS_PORT_DEFAULT;
-    if (shardModel != null && shardModel.getRedises().size() > 0) {
-      port = shardModel.getRedises().get(0).getRedisPort();
-    }
-    return port;
   }
 
   private String getShardClusterName(ShardModel shardModel) {

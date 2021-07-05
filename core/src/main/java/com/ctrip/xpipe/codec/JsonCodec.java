@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * @author wenchao.meng
@@ -30,7 +31,7 @@ public class JsonCodec extends AbstractCodec{
 	}
 
 	public JsonCodec(boolean indent, boolean privateVisible){
-		
+
 		objectMapper = new ObjectMapper();
 		objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -102,5 +103,4 @@ public class JsonCodec extends AbstractCodec{
 			throw new IllegalStateException("decode error " + new String(data), e);
 		}
 	}
-
 }

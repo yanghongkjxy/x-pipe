@@ -11,6 +11,7 @@ import com.ctrip.xpipe.utils.ChannelUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 
+import java.io.IOException;
 import java.net.SocketException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -25,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNettyCommand<V> implements ByteBufReceiver, RequestResponseCommand<V>{
 		
 	protected ScheduledExecutorService scheduled;
+
+	private ScheduledFuture<?> timeoutFuture = null;
 	
 	public AbstractNettyRequestResponseCommand(String host, int port, ScheduledExecutorService scheduled){
 		super(host, port);
@@ -40,7 +43,7 @@ public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNet
 	protected void doSendRequest(final NettyClient nettyClient, ByteBuf byteBuf) {
 		
 		if(logRequest()){
-			logger.info("[doSendRequest]{}, {}", nettyClient, ByteBufUtils.readToString(byteBuf.slice()));
+			getLogger().info("[doSendRequest]{}, {}", nettyClient, ByteBufUtils.readToString(byteBuf.slice()));
 		}
 
 		if(hasResponse()){
@@ -53,13 +56,13 @@ public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNet
 		}
 		
 		if(getCommandTimeoutMilli() > 0 && scheduled != null){
-			
-			logger.debug("[doSendRequest][schedule timeout]{}, {}", this, getCommandTimeoutMilli());
-			final ScheduledFuture<?> timeoutFuture = scheduled.schedule(new AbstractExceptionLogTask() {
+
+			getLogger().debug("[doSendRequest][schedule timeout]{}, {}", this, getCommandTimeoutMilli());
+			timeoutFuture = scheduled.schedule(new AbstractExceptionLogTask() {
 				
 				@Override
 				public void doRun() {
-					AbstractNettyRequestResponseCommand.this.logger.info("[{}][run][timeout]{}", AbstractNettyRequestResponseCommand.this, nettyClient);
+					getLogger().info("[{}][run][timeout]{}", AbstractNettyRequestResponseCommand.this, nettyClient);
 					future().setFailure(new CommandTimeoutException("timeout " +  + getCommandTimeoutMilli()));
 				}
 			}, getCommandTimeoutMilli(), TimeUnit.MILLISECONDS);
@@ -75,12 +78,13 @@ public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNet
 					} catch (InterruptedException e) {
 					}catch(ExecutionException e){
 						if(e.getCause() instanceof CommandTimeoutException){
+							handleTimeout(nettyClient);
 							cancel = false;
 						}
 					}
 					if(cancel){
-						logger.debug("[operationComplete][cancel timeout future]");
-						timeoutFuture.cancel(false);
+						getLogger().debug("[operationComplete][cancel timeout future]");
+						cancelTimeout();
 					}
 				}
 			});
@@ -97,7 +101,7 @@ public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNet
 	public RECEIVER_RESULT receive(Channel channel, ByteBuf byteBuf) {
 		
 		if(future().isDone()){
-			logger.debug("[receive][done, return]{}", channel);
+			getLogger().debug("[receive][done, return]{}", channel);
 			return RECEIVER_RESULT.ALREADY_FINISH;
 		}
 		
@@ -105,7 +109,7 @@ public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNet
 			 V result = doReceiveResponse(channel, byteBuf);
 			 if(result != null){
 				 if(logResponse()){
-					 logger.info("[receive]{}, {}", ChannelUtil.getDesc(channel), result);
+					 getLogger().info("[receive]{}, {}", ChannelUtil.getDesc(channel), result);
 				 }
 				 if(!future().isDone()) {
 					 future().setSuccess(result);
@@ -142,10 +146,28 @@ public abstract class AbstractNettyRequestResponseCommand<V> extends AbstractNet
 		}
 	}
 
+	@Override
+	public void clientClosed(NettyClient nettyClient, Throwable th) {
+		if(!future().isDone()){
+			future().setFailure(new IOException("remote closed:" + nettyClient, th));
+		}
+	}
+
 	protected abstract V doReceiveResponse(Channel channel, ByteBuf byteBuf) throws Exception;
 
 	@Override
 	public int getCommandTimeoutMilli() {
 		return 0;
+	}
+
+	protected void handleTimeout(NettyClient nettyClient) {
+		nettyClient.onTimeout(AbstractNettyRequestResponseCommand.this, getCommandTimeoutMilli());
+	}
+
+	protected void cancelTimeout() {
+		if (null != timeoutFuture && !timeoutFuture.isDone()) {
+			timeoutFuture.cancel(false);
+			timeoutFuture = null;
+		}
 	}
 }

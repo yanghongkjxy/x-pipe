@@ -31,6 +31,76 @@ public class MigrationClusterDao extends AbstractXpipeConsoleDAO{
         migrationClusterTblDao = ContainerLoader.getDefaultContainer().lookup(MigrationClusterTblDao.class);
     }
 
+    public List<MigrationClusterTbl> find(long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClusters(
+                        size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByCluster(long clusterId, long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByCluster(
+                        clusterId, size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByOperator(String operator, long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByOperator(
+                        operator, size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByStatus(String status, long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByStatus(
+                        status, size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public long countAllByCluster(long clusterId) {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao.countAllByCluster(
+                        clusterId, MigrationClusterTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
+    public long countAllByOperator(String operator) {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao.countAllByOperator(
+                        operator, MigrationClusterTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
+    public long countAllByStatus(String status) {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao.countAllByStatus(
+                        status, MigrationClusterTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
     public List<MigrationClusterTbl> findUnfinishedByClusterId(final long clusterId){
 
         return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
@@ -140,6 +210,15 @@ public class MigrationClusterDao extends AbstractXpipeConsoleDAO{
             @Override
             public MigrationClusterTbl doQuery() throws DalException {
                 return migrationClusterTblDao.findByPK(id, MigrationClusterTblEntity.READSET_FULL);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findLatestMigrationClusters(Date date) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findLatestMigrationClusters(date, MigrationClusterTblEntity.READSET_FULL);
             }
         });
     }

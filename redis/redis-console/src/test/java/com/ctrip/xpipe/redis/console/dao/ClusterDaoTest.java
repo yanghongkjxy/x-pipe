@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.console.dao;
 
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.OrganizationTbl;
@@ -34,6 +35,7 @@ public class ClusterDaoTest  extends AbstractConsoleIntegrationTest {
                 .setClusterDescription("ut-cluster")
                 .setActivedcId(1)
                 .setClusterName("ut-cluster")
+                .setClusterType(ClusterType.ONE_WAY.toString())
                 .setCount(12)
                 .setIsXpipeInterested(true)
                 .setClusterLastModifiedTime("test-last-modified")
@@ -92,10 +94,30 @@ public class ClusterDaoTest  extends AbstractConsoleIntegrationTest {
         logger.info("{}", clusterDao.findAllClusterWithOrgInfo());
     }
 
+    @Test
+    public void testFindMigratingClustersWithEvents() {
+        List<ClusterTbl> clusters = clusterDao.findMigratingClustersWithEvents();
+        Assert.assertEquals(2, clusters.size());
+        for (ClusterTbl cluster : clusters) {
+            switch (cluster.getClusterName()) {
+                case "cluster11":
+                    Assert.assertEquals(10001, cluster.getMigrationEvent().getId());
+                    continue;
+                case "cluster10":
+                    Assert.assertEquals(0, cluster.getMigrationEvent().getId());
+                    continue;
+            }
+        }
+    }
+
     @Override
     protected String prepareDatas() throws IOException {
-        return "insert into CLUSTER_TBL (id,cluster_name,activedc_id,cluster_description,cluster_last_modified_time,status,is_xpipe_interested, cluster_org_id) values (2,'cluster2',1,'Cluster:cluster2 , ActiveDC : A','0000000000000000','Normal',1, 2);\n"
+        return "insert into CLUSTER_TBL (id,cluster_name,activedc_id,cluster_description,cluster_last_modified_time,status, is_xpipe_interested, cluster_org_id) values (2,'cluster2',1,'Cluster:cluster2 , ActiveDC : A','0000000000000000','Normal',1, 2);\n"
                 + "\n"
-                + "insert into organization_tbl(org_id, org_name) values (1, 'org-1'), (2, 'org-2'), (3, 'org-3'), (4, 'org-4'), (5, 'org-5'), (6, 'org-6')";
+                + "insert into organization_tbl(org_id, org_name) values (1, 'org-1'), (2, 'org-2'), (3, 'org-3'), (4, 'org-4'), (5, 'org-5'), (6, 'org-6');\n"
+                + "\n"
+                + "insert into CLUSTER_TBL (id,cluster_name,activedc_id,cluster_description,cluster_last_modified_time,status, is_xpipe_interested, cluster_org_id, migration_event_id) values (10,'cluster10',1,'Cluster:cluster10 , ActiveDC : A','0000000000000000','Migrating', 1, 2, 10000), (11,'cluster11',1,'Cluster:cluster11 , ActiveDC : A','0000000000000000','Migrating', 1, 2, 10001);\n"
+                + "\n"
+                + "insert into MIGRATION_EVENT_TBL (id, start_time, operator, event_tag, DataChange_LastTime, deleted, break, lock_until) values (10001,'2021-04-25 14:19:46.000000', 'wucc', '20210425141946587-wucc', '2021-04-25 14:20:10.000000', 0, 0, 0)";
     }
 }

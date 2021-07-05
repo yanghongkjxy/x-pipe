@@ -11,6 +11,7 @@ import com.ctrip.xpipe.api.monitor.Task;
 import com.ctrip.xpipe.api.monitor.TransactionMonitor;
 import com.ctrip.xpipe.api.observer.Observable;
 import com.ctrip.xpipe.api.observer.Observer;
+import com.ctrip.xpipe.api.proxy.ProxyEnabled;
 import com.ctrip.xpipe.cluster.ElectContext;
 import com.ctrip.xpipe.concurrent.LongTimeAlertTask;
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
@@ -22,15 +23,14 @@ import com.ctrip.xpipe.redis.core.entity.KeeperInstanceMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.meta.KeeperState;
 import com.ctrip.xpipe.redis.core.meta.MetaZkConfig;
-import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
 import com.ctrip.xpipe.redis.core.protocal.RedisProtocol;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
-import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
 import com.ctrip.xpipe.redis.core.store.FullSyncListener;
 import com.ctrip.xpipe.redis.core.store.ReplicationStore;
 import com.ctrip.xpipe.redis.core.store.ReplicationStoreManager;
 import com.ctrip.xpipe.redis.keeper.*;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.KeeperResourceManager;
 import com.ctrip.xpipe.redis.keeper.exception.RedisSlavePromotionException;
 import com.ctrip.xpipe.redis.keeper.handler.CommandHandlerManager;
 import com.ctrip.xpipe.redis.keeper.monitor.KeeperMonitor;
@@ -38,8 +38,7 @@ import com.ctrip.xpipe.redis.keeper.monitor.KeepersMonitorManager;
 import com.ctrip.xpipe.redis.keeper.netty.NettyMasterHandler;
 import com.ctrip.xpipe.redis.keeper.store.DefaultFullSyncListener;
 import com.ctrip.xpipe.redis.keeper.store.DefaultReplicationStoreManager;
-import com.ctrip.xpipe.utils.ClusterShardAwareThreadFactory;
-import com.ctrip.xpipe.utils.OsUtils;
+import com.ctrip.xpipe.utils.*;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
@@ -89,7 +88,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	
 	private long keeperStartTime;
 	
-	private ReplicationStoreManager replicationStoreManager;
+	@VisibleForTesting ReplicationStoreManager replicationStoreManager;
 
 	private ServerSocketChannel serverSocketChannel;
 	
@@ -97,8 +96,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
     private EventLoopGroup workerGroup;
     private NioEventLoopGroup masterEventLoopGroup;
 
-
-	private Map<Channel, RedisClient>  redisClients = new ConcurrentHashMap<Channel, RedisClient>();
+	private final Map<Channel, RedisClient>  redisClients = new ConcurrentHashMap<Channel, RedisClient>();
 	
 	private ScheduledExecutorService scheduled;
 	private ExecutorService clientExecutors;
@@ -112,10 +110,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	private LeaderElector leaderElector;
 
 	private LeaderElectorManager leaderElectorManager;
-	
-	@SuppressWarnings("unused")
-	private MetaServerKeeperService metaService;
-	
+
 	private volatile AtomicReference<RdbDumper> rdbDumper = new AtomicReference<RdbDumper>(null);
 	private long lastDumpTime = -1;
 	//for test
@@ -124,12 +119,11 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	private KeepersMonitorManager keepersMonitorManager;
 	private KeeperMonitor keeperMonitor;
 
-	private ProxyResourceManager proxyResourceManager;
-	
+	private KeeperResourceManager resourceManager;
+
 	public DefaultRedisKeeperServer(KeeperMeta currentKeeperMeta, KeeperConfig keeperConfig, File baseDir,
-									MetaServerKeeperService metaService,
 									LeaderElectorManager leaderElectorManager,
-									KeepersMonitorManager keepersMonitorManager, ProxyResourceManager proxyResourceManager){
+									KeepersMonitorManager keepersMonitorManager, KeeperResourceManager resourceManager){
 		this.clusterId = currentKeeperMeta.parent().parent().getId();
 		this.shardId = currentKeeperMeta.parent().getId();
 		this.currentKeeperMeta = currentKeeperMeta;
@@ -138,9 +132,8 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 		this.keeperMonitor = keepersMonitorManager.getOrCreate(this);
 		this.replicationStoreManager = new DefaultReplicationStoreManager(keeperConfig, clusterId, shardId, currentKeeperMeta.getId(), baseDir, keeperMonitor);
 		replicationStoreManager.addObserver(new ReplicationStoreManagerListener());
-		this.metaService = metaService;
 		this.leaderElectorManager = leaderElectorManager;
-		this.proxyResourceManager = proxyResourceManager;
+		this.resourceManager = resourceManager;
 	}
 
 	private LeaderElector createLeaderElector(){
@@ -157,7 +150,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 
 		replicationStoreManager.initialize();
 		
-		String threadPoolName = String.format("keeper:%s-%s", clusterId, shardId);
+		String threadPoolName = String.format("keeper:%s", StringUtil.makeSimpleName(clusterId, shardId));
 		logger.info("[doInitialize][keeper config]{}", keeperConfig);
 
 		clientExecutors = Executors.newSingleThreadExecutor(ClusterShardAwareThreadFactory.create(clusterId, shardId, "RedisClient-" + threadPoolName));
@@ -216,7 +209,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	@Override
 	protected void doStart() throws Exception {
 		super.doStart();
-		keeperMonitor.getKeeperStats().start();
+		keeperMonitor.start();
 		replicationStoreManager.start();
 		keeperStartTime = System.currentTimeMillis();
 		startServer();
@@ -227,12 +220,26 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	
 	@Override
 	protected void doStop() throws Exception {
-		keeperMonitor.getKeeperStats().stop();
+		keeperMonitor.stop();
+		clearClients();
 		LifecycleHelper.stopIfPossible(keeperRedisMaster);
 		this.leaderElector.stop();
 		stopServer();
-		replicationStoreManager.stop();		
+		replicationStoreManager.stop();
 		super.doStop();
+	}
+
+	private void clearClients() {
+		for (Entry<Channel, RedisClient> entry : redisClients.entrySet()) {
+			RedisClient client = entry.getValue();
+			try {
+				logger.info("[clearClients]close:{}", client);
+				client.close();
+			} catch (IOException e) {
+				logger.error("[clearClients]" + client, e);
+			}
+		}
+		redisClients.clear();
 	}
 
 	@Override
@@ -258,7 +265,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 
 		if(keeperRedisMaster != null && target != null && keeperRedisMaster.getLifecycleState().isStarted()){
 			Endpoint current = keeperRedisMaster.masterEndPoint();
-			if(current != null && current.getHost().equals(target.getHost()) && current.getPort() == target.getPort()){
+			if(current != null && isMasterSame(current, target)) {
 				logger.info("[reconnectMaster][master the same]{},{}", current, target);
 				return;
 			}
@@ -272,10 +279,21 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 		initAndStartMaster(target);
 	}
 
+	private boolean isMasterSame(Endpoint current, Endpoint target) {
+		boolean result = ObjectUtils.equals(current, target);
+		if(!result) {
+			return false;
+		}
+		if(current instanceof ProxyEnabled && target instanceof ProxyEnabled) {
+			result = ((ProxyEnabled) current).isSameWith((ProxyEnabled) target);
+		}
+		return result;
+	}
+
 	private void initAndStartMaster(Endpoint target) {
 		try {
 			this.keeperRedisMaster = new DefaultRedisMaster(this, (DefaultEndPoint)target, masterEventLoopGroup,
-					replicationStoreManager, scheduled, proxyResourceManager);
+					replicationStoreManager, scheduled, resourceManager);
 
 			if(getLifecycleState().isStopping() || getLifecycleState().isStopped()){
 				logger.info("[initAndStartMaster][stopped, exit]{}, {}", target, this);
@@ -336,14 +354,23 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 
 	protected void becomeSlave(Channel channel, RedisSlave redisSlave) {
 
-		logger.info("[update][redis client become slave]{}",channel);
-		redisClients.put(channel, redisSlave);
+		logger.info("[update][redis client become slave]{}", channel);
+
+		synchronized (channel) {
+			if (redisClients.get(channel) == null) {
+				logger.info("[update][redis client become slave]{}{}", channel, "slave is already closed");
+				return;
+			}
+			redisClients.put(channel, redisSlave);
+		}
 	}
 
 	@Override
-	public void clientDisConnected(Channel channel) {
-		
-		redisClients.remove(channel);
+	public void clientDisconnected(Channel channel) {
+
+		synchronized (channel) {
+			redisClients.remove(channel);
+		}
 	}
 
 	@Override
@@ -425,7 +452,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	}
 
 	@Override
-	public void beginWriteRdb(EofType eofType, long offset) {
+	public void beginWriteRdb(EofType eofType, String replId, long offset) {
 	}
 
 	@Override
@@ -440,7 +467,7 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 	}
 
 	@Override
-	public void onFullSync() {
+	public void onFullSync(long masterRdbOffset) {
 		//alert full sync
 		String alert = String.format("FULL(S)->%s[%s,%s]", getRedisMaster().metaInfo(), getClusterId(), getShardId());
 		EventMonitor.DEFAULT.logAlertEvent(alert);
@@ -492,6 +519,12 @@ public class DefaultRedisKeeperServer extends AbstractRedisServer implements Red
 				DefaultRedisKeeperServer.this.redisKeeperServerState = redisKeeperServerState;
 				notifyObservers(new KeeperServerStateChanged(previous, redisKeeperServerState));
 			}
+
+			@Override
+			public Map getData() {
+				return null;
+			}
+
 		});
 		
 	}

@@ -4,7 +4,7 @@
     <parent>
         <groupId>com.ctrip.framework.xpipe</groupId>
         <artifactId>services</artifactId>
-        <version>1.1.0-SNAPSHOT</version>
+        <version>1.2.4</version>
     </parent>
     <!-- ctrip related infrastructure -->
     <artifactId>ctrip-service</artifactId>
@@ -19,26 +19,12 @@
             <artifactId>dal-jdbc</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.ctrip.hickwall</groupId>
-            <artifactId>client</artifactId>
-            <exclusions>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-simple</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
-        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
         <dependency>
             <groupId>com.ctrip.framework.xpipe</groupId>
             <artifactId>core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.ctrip.framework.apollo</groupId>
-            <artifactId>apollo-client</artifactId>
         </dependency>
         <dependency>
             <groupId>com.dianping.cat</groupId>
@@ -55,23 +41,90 @@
             <artifactId>jedis</artifactId>
         </dependency>
         <dependency>
+            <groupId>qunar.tc.qconfig</groupId>
+            <artifactId>qconfig-client</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.ctrip.infosec</groupId>
             <artifactId>sso-client-qconfig</artifactId>
+            <version>1.0.7</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>qunar.common</groupId>
+                    <artifactId>common-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>commons-collections</groupId>
+                    <artifactId>commons-collections</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.alibaba</groupId>
+                    <artifactId>fastjson</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>net.razorvine</groupId>
             <artifactId>pyrolite</artifactId>
         </dependency>
+
+        <!--DB Migration Project-->
         <dependency>
-            <groupId>com.ctrip.basebiz</groupId>
-            <artifactId>EmailServiceClient</artifactId>
-            <version>1.0.0</version>
+            <groupId>com.ctrip.platform</groupId>
+            <artifactId>ctrip-datasource</artifactId>
             <exclusions>
                 <exclusion>
-                    <groupId>javax.servlet</groupId>
-                    <artifactId>javax.servlet-api</artifactId>
+                    <groupId>org.apache.tomcat</groupId>
+                    <artifactId>tomcat-juli</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.persistence</groupId>
+                    <artifactId>persistence-api</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ctrip.framework.fireman</groupId>
+            <artifactId>fireman</artifactId>
+            <version>2.0.4</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.aspectj</groupId>
+                    <artifactId>aspectjrt</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.ctrip.platform</groupId>
+                    <artifactId>ctrip-datasource</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>com.alibaba</groupId>
+                    <artifactId>fastjson</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>qunar.common</groupId>
+            <artifactId>common-core</artifactId>
+        </dependency>
+
+        <!--Email Service-->
+        <dependency>
+            <groupId>com.ctrip.soa.platform.basesystem.emailservice.v1</groupId>
+            <artifactId>emailservice</artifactId>
+            <version>1.2.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>mockwebserver</artifactId>
+            <version>3.12.0</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 

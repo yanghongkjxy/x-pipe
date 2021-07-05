@@ -20,7 +20,7 @@ public class MigrationPartialSuccessRollBackState extends AbstractMigrationState
     public MigrationPartialSuccessRollBackState(MigrationCluster holder) {
         super(holder, MigrationStatus.RollBack);
         this.setNextAfterSuccess(new MigrationAbortedState(holder))
-                .setNextAfterFail(this);
+                .setNextAfterFail(new MigrationPartialSuccessRollBackFailState(holder));
     }
 
     @Override
@@ -59,6 +59,7 @@ public class MigrationPartialSuccessRollBackState extends AbstractMigrationState
 		}
         
         String error = errorMessage.toString();
+        logger.info("[doAction] {}", error);
         if(StringUtil.isEmpty(error)){
         	updateAndProcess(nextAfterSuccess());
         }else{

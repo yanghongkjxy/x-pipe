@@ -1,20 +1,23 @@
 package com.ctrip.xpipe.redis.console.controller.api.data;
 
 import com.ctrip.xpipe.api.migration.DC_TRANSFORM_DIRECTION;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.redis.console.annotation.DalTransaction;
+import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
-import com.ctrip.xpipe.redis.console.controller.api.RetMessage;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
 import com.ctrip.xpipe.redis.console.controller.api.data.meta.CheckFailException;
 import com.ctrip.xpipe.redis.console.controller.api.data.meta.ClusterCreateInfo;
 import com.ctrip.xpipe.redis.console.controller.api.data.meta.RedisCreateInfo;
 import com.ctrip.xpipe.redis.console.controller.api.data.meta.ShardCreateInfo;
 import com.ctrip.xpipe.redis.console.model.*;
-import com.ctrip.xpipe.redis.console.resources.MetaCache;
+import com.ctrip.xpipe.redis.core.meta.MetaCache;
 import com.ctrip.xpipe.redis.console.service.*;
 import com.ctrip.xpipe.redis.console.service.exception.ResourceNotFoundException;
+import com.ctrip.xpipe.redis.console.service.meta.ClusterMetaService;
+import com.ctrip.xpipe.redis.console.util.MetaServerConsoleServiceManagerWrapper;
 import com.ctrip.xpipe.redis.core.entity.XpipeMeta;
 import com.ctrip.xpipe.redis.core.meta.ClusterShardCounter;
-import com.ctrip.xpipe.redis.core.protocal.RedisProtocol;
 import com.ctrip.xpipe.utils.ObjectUtils;
 import com.ctrip.xpipe.utils.VisibleForTesting;
 import com.google.common.collect.Sets;
@@ -24,6 +27,9 @@ import org.springframework.web.bind.annotation.*;
 import org.unidal.dal.jdbc.DalException;
 
 import java.util.*;
+import java.util.stream.Collectors;
+
+import static com.ctrip.xpipe.redis.core.protocal.RedisProtocol.KEEPER_PORT_DEFAULT;
 
 /**
  * @author wenchao.meng
@@ -36,6 +42,9 @@ public class MetaUpdate extends AbstractConsoleController {
 
     @Autowired
     protected ClusterService clusterService;
+
+    @Autowired
+    private ClusterMetaService clusterMetaService;
 
     @Autowired
     protected DcService dcService;
@@ -57,6 +66,12 @@ public class MetaUpdate extends AbstractConsoleController {
 
     @Autowired
     protected KeeperAdvancedService keeperAdvancedService;
+
+    @Autowired
+    private MetaServerConsoleServiceManagerWrapper metaServerConsoleServiceManagerWrapper;
+
+    @Autowired
+    private ConsoleConfig consoleConfig;
 
     @RequestMapping(value = "/stats", method = RequestMethod.GET)
     public Map<String, Integer> getStats() {
@@ -98,6 +113,7 @@ public class MetaUpdate extends AbstractConsoleController {
         }
 
         ClusterModel clusterModel = new ClusterModel();
+        ClusterType clusterType = ClusterType.lookup(clusterCreateInfo.getClusterType());
         OrganizationTbl organizationTbl;
         try {
             organizationTbl = getOrganizationTbl(clusterCreateInfo);
@@ -105,9 +121,11 @@ public class MetaUpdate extends AbstractConsoleController {
         } catch (Exception e) {
             return RetMessage.createFailMessage(e.getMessage());
         }
+        long activeDcId = clusterType.supportMultiActiveDC() ? 0 : dcs.get(0).getId();
         clusterModel.setClusterTbl(new ClusterTbl()
-                .setActivedcId(dcs.get(0).getId())
+                .setActivedcId(activeDcId)
                 .setClusterName(clusterCreateInfo.getClusterName())
+                .setClusterType(clusterCreateInfo.getClusterType())
                 .setClusterDescription(clusterCreateInfo.getDesc())
                 .setClusterAdminEmails(clusterCreateInfo.getClusterAdminEmails())
                 .setOrganizationInfo(organizationTbl)
@@ -116,12 +134,37 @@ public class MetaUpdate extends AbstractConsoleController {
 
 
         try {
-            clusterModel.setSlaveDcs(dcs.subList(1, dcs.size()));
+            clusterModel.setDcs(dcs);
             clusterService.createCluster(clusterModel);
             return RetMessage.createSuccessMessage();
         } catch (Exception e) {
             return RetMessage.createFailMessage(e.getMessage());
         }
+    }
+
+    //synchronizelly delete cluster, including meta server
+    @RequestMapping(value = "/cluster/" + CLUSTER_NAME_PATH_VARIABLE, method = RequestMethod.DELETE)
+    public RetMessage deleteCluster(@PathVariable String clusterName) {
+        logger.info("[deleteCluster]{}", clusterName);
+        try {
+            List<DcTbl> dcTbls = clusterService.getClusterRelatedDcs(clusterName);
+            clusterService.deleteCluster(clusterName);
+            for(DcTbl dcTbl : dcTbls) {
+                try {
+                    metaServerConsoleServiceManagerWrapper.get(dcTbl.getDcName()).clusterDeleted(clusterName);
+                } catch (Exception e) {
+                    logger.warn("[deleteCluster]", e);
+                    return RetMessage.createFailMessage("[" + dcTbl.getDcName() + "]MetaServer fails" + e.getMessage());
+                }
+            }
+            return RetMessage.createSuccessMessage();
+        } catch (Exception e) {
+            logger.error("[deleteCluster]", e);
+            return RetMessage.createFailMessage(e.getMessage());
+        } finally {
+            logger.info("[deleteCluster][end]");
+        }
+
     }
 
     private OrganizationTbl getOrganizationTbl(ClusterCreateInfo clusterCreateInfo) {
@@ -213,11 +256,15 @@ public class MetaUpdate extends AbstractConsoleController {
     }
 
     @RequestMapping(value = "/clusters", method = RequestMethod.GET)
-    public List<ClusterCreateInfo> getClusters() {
+    public List<ClusterCreateInfo> getClusters(
+            @RequestParam(required=false, defaultValue = "one_way", name = "type") String clusterType) throws CheckFailException {
+        if (!ClusterType.isTypeValidate(clusterType)) {
+            throw new CheckFailException("unknow cluster type " + clusterType);
+        }
 
         logger.info("[getClusters]");
 
-        List<ClusterTbl> allClusters = clusterService.findAllClustersWithOrgInfo();
+        List<ClusterTbl> allClusters = clusterService.findClustersWithOrgInfoByClusterType(clusterType);
 
         List<ClusterCreateInfo> result = new LinkedList<>();
         allClusters.forEach(clusterTbl -> {
@@ -347,15 +394,51 @@ public class MetaUpdate extends AbstractConsoleController {
         logger.info("[deleteShard] Delete Shard {} - {}", clusterName, shardName);
         try {
             if(clusterService.find(clusterName) == null) {
-                RetMessage.createSuccessMessage("Cluster already not exist");
+                return RetMessage.createSuccessMessage("Cluster already not exist");
             }
             if(shardService.find(clusterName, shardName) == null) {
-                RetMessage.createSuccessMessage("Shard already not exist");
+                return RetMessage.createSuccessMessage("Shard already not exist");
             }
             shardService.deleteShard(clusterName, shardName);
             return RetMessage.createSuccessMessage("Successfully deleted shard");
         } catch (Exception e) {
             logger.error("[deleteShard] {}", e);
+            return RetMessage.createFailMessage(e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/shards/" + CLUSTER_NAME_PATH_VARIABLE + "/sync", method = RequestMethod.DELETE)
+    public RetMessage syncBatchDeleteShards(@PathVariable String clusterName, @RequestBody List<String> shardNames) {
+        logger.info("[deleteShard] Delete Shards {} - {}", clusterName, shardNames);
+        try {
+            ClusterTbl clusterTbl = clusterService.find(clusterName);
+            if (clusterTbl == null) {
+                return RetMessage.createSuccessMessage("Cluster already not exist");
+            }
+            List<ShardTbl> allShards = shardService.findAllByClusterName(clusterName);
+            if(!allShards.isEmpty()){
+                // some already deleted, some not
+                Set<String> allShardNames = allShards.stream().map(ShardTbl::getShardName).collect(Collectors.toSet());
+                if(!allShardNames.containsAll(shardNames)){
+                    return RetMessage.createSuccessMessage("Some shard already not exist");
+                }
+            }else {
+                return RetMessage.createSuccessMessage("Shard already not exist");
+            }
+            shardService.deleteShards(clusterTbl, shardNames);
+            List<DcTbl> dcTbls = clusterService.getClusterRelatedDcs(clusterName);
+            for (DcTbl dcTbl : dcTbls) {
+                try {
+                    metaServerConsoleServiceManagerWrapper.get(dcTbl.getDcName()).clusterModified(clusterName,
+                            clusterMetaService.getClusterMeta(dcTbl.getDcName(), clusterName));
+                } catch (Exception e) {
+                    logger.warn("[modifiedCluster] notify dc {} MetaServer fail", dcTbl.getDcName(), e);
+                    return RetMessage.createFailMessage("[" + dcTbl.getDcName() + "]MetaServer fails" + e.getMessage());
+                }
+            }
+            return RetMessage.createSuccessMessage("Successfully deleted shard");
+        } catch (Exception e) {
+            logger.error("[deleteShard]", e);
             return RetMessage.createFailMessage(e.getMessage());
         }
     }
@@ -385,7 +468,7 @@ public class MetaUpdate extends AbstractConsoleController {
             String dcId = outerDcToInnerDc(redisCreateInfo.getDcId());
             redisService.insertRedises(dcId, clusterName, shardName,
                     redisCreateInfo.getRedisAddresses());
-            addKeepers(dcId, clusterName, shardTbl);
+            if (ClusterType.lookup(clusterTbl.getClusterType()).supportKeeper()) addKeepers(dcId, clusterName, shardTbl);
         }
     }
 
@@ -415,7 +498,7 @@ public class MetaUpdate extends AbstractConsoleController {
         }
 
         List<KeeperBasicInfo> bestKeepers = keeperAdvancedService.findBestKeepers(dcId,
-                RedisProtocol.REDIS_PORT_DEFAULT, (ip, port) -> true, clusterId);
+                KEEPER_PORT_DEFAULT, (ip, port) -> true, clusterId);
 
         logger.info("[addKeepers]{},{},{},{}, {}", dcId, clusterId, shardTbl.getShardName(), bestKeepers);
         try {

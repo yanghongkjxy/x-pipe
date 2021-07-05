@@ -24,6 +24,14 @@
 				<member name='dc-description'/>
 			</readset>
 		</readsets>
+
+		<updatesets>
+			<readset name="MAIN">
+				<member name="zone-id"/>
+				<member name='dc-name'/>
+				<member name='dc-description'/>
+			</readset>
+		</updatesets>
 		
 		<query-defs>
 			<query name="find-all-dcs" type="SELECT" multiple="true">
@@ -106,6 +114,14 @@
 					]]>
 				</statement>
 			</query>
+			<query name='insert-with-part-field' type='INSERT' batch='false'>
+				<statement>
+					<![CDATA[
+					INSERT INTO <TABLE/>(<FIELDS/>)
+        			VALUES(<VALUES/>)
+        			]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -114,18 +130,34 @@
 		<var name="cluster-org-name" value-type="String"/>
 		<var name="cluster-names" value-type="java.util.List&lt;String&gt;" />
 		<var name="dc-id" value-type="long"/>
+		<var name="ids" value-type="java.util.List&lt;Long&gt;" />
+		<var name="origin-status" value-type="String"/>
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt" multiple="true"/>
 		<relation name="dc-cluster-info" entity-name="dc-cluster-tbl" entity-alias="dct" multiple="true"/>
 		<relation name="shard-info" entity-name="shard-tbl" entity-alias="st2" multiple="true"/>
 		<relation name="organization-info" entity-name="organization-tbl" entity-alias="ot"/>
+		<relation name="migration-event" entity-name="migration-event-tbl" entity-alias="met"/>
+		<relation name="migration-clusters" entity-name="migration-cluster-tbl" entity-alias="mct"/>
+
+		<updatesets>
+			<updateset name="MIGRATION_STATUS" >
+				<member name="status" />
+				<member name="migration-event-id" />
+			</updateset>
+		</updatesets>
 
 		<readsets>
 			<readset name="COUNT">
 				<member name="count"/>
 			</readset>
 			<readset name="NAME">
+				<member name="id"/>
 				<member name='cluster-name'/>
+			</readset>
+			<readset name="CREATE_TIME">
+				<member name='cluster-name'/>
+				<member name="create-time"/>
 			</readset>
 			<readset name="FULL_WITH_SHARDS">
 				<readset-ref name="FULL"/>
@@ -138,13 +170,91 @@
 			<readset name="CLUSTER_META_INFO">
 				<member name="id"/>
 				<member name="cluster-name"/>
+				<member name="cluster-type"/>
 				<member name="status"/>
+				<member name="migration-event-id"/>
 				<member name="activedc-id"/>
 				<member name="cluster-org-id"/>
+			</readset>
+			<readset name="FULL_WITH_MIGRATION_EVENT">
+                <readset-ref name="FULL"/>
+                <readset-ref name="FULL" relation-name="migration-event"/>
+            </readset>
+			<readset name="FULL_WITH_MIGRATION_OVERVIEW">
+				<readset-ref name="FULL"/>
+				<readset-ref name="ID" relation-name="migration-event"/>
+				<readset-ref name="STATUS" relation-name="migration-clusters"/>
 			</readset>
 		</readsets>
 		
 		<query-defs>
+			<query name="count-by-active-dc" type="SELECT" multiple="false">
+				<param name='activedc-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='activedc-id'/> = ${activedc-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="atomic-set-status" type="UPDATE" batch='false'>
+				<param name="id" />
+				<param name="origin-status" />
+				<statement><![CDATA[
+					UPDATE <TABLE />
+					SET <FIELDS />
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='status' /> = ${origin-status}
+					AND <FIELD name='deleted'/> = 0
+				]]></statement>
+			</query>
+			<query name="find-clusters-with-org-info-by-id" type="SELECT" multiple="true">
+				<param name="ids" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join  <TABLE name='organization-info'/> on <FIELD name='cluster-org-id'/> = ot.id
+					WHERE <FIELD name='id'/> IN <IN>${ids}</IN>
+					]]>
+				</statement>
+			</query>
+			<query name="find-clusters-with-org-info-by-cluster-type" type="SELECT" multiple="true">
+				<param name="cluster-type" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join  <TABLE name='organization-info'/> on <FIELD name='cluster-org-id'/> = ot.id
+					WHERE <FIELD name='cluster-type' /> = ${cluster-type}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-migrating-clusters-with-events" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join <TABLE name='migration-event'/> on <FIELD name='migration-event-id'/> = met.id
+					WHERE <FIELD name='status'/> != 'Normal'
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-migrating-clusters-overview" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join <TABLE name='migration-event'/> on <FIELD name='migration-event-id'/> = met.id
+					left join <TABLE name='migration-clusters'/> on met.id = mct.migration_event_id
+					WHERE <FIELD name='id'/>  = mct.cluster_id
+					AND <FIELD name='status'/> != 'Normal'
+					AND <FIELD name='deleted'/> = 0
+					AND met.deleted = 0
+					AND mct.deleted = 0
+					]]>
+				</statement>
+			</query>
 			<query name="total-count" type="SELECT" multiple="false">
 				<statement>
 				<![CDATA[
@@ -255,7 +365,7 @@
 				<statement>
 					<![CDATA[
 					UPDATE <TABLE/>
-					SET <FIELD name='status'/> = ${status}
+					SET <FIELDS />
 					WHERE <FIELD name='id'/> = ${id}
 					AND <FIELD name='deleted'/> = 0
 					]]>
@@ -276,6 +386,20 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-all-by-dc-id" type="SELECT" multiple="true">
+				<param name='dc-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-info' />
+					WHERE <FIELD name='id' /> = dct.cluster_id
+					AND dct.dc_id = ${dc-id}
+					AND <FIELD name='deleted' /> = 0
+					AND dct.deleted = 0
+					group by <FIELD name='id' />
+					]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -292,6 +416,9 @@
 			<readset name="FULL_WITH_DC">
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="dc-info"/>
+			</readset>
+			<readset name="CLUSTER_ID">
+				<member name="cluster-id" />
 			</readset>
 		</readsets>
 
@@ -386,6 +513,7 @@
 
 	<entity name="shard-tbl" table="SHARD_TBL" alias="st2">
 		<var name="cluster-name" value-type="String"/>
+		<var name="shard-names" value-type="java.util.List&lt;String&gt;"/>
 
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
 
@@ -397,6 +525,11 @@
 				<member name="setinel-monitor-name"/>
 			</readset>
 			<readset name="NAME_AND_MONITOR_NAME">
+				<member name="shard-name"/>
+				<member name="setinel-monitor-name"/>
+			</readset>
+			<readset name="ID_NAME_AND_MONITOR_NAME">
+				<member name="id"/>
 				<member name="shard-name"/>
 				<member name="setinel-monitor-name"/>
 			</readset>
@@ -442,6 +575,21 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-by-shard-names" type="SELECT" multiple="true">
+				<param name="cluster-name"/>
+				<param name="shard-names"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>
+					WHERE <FIELD name='shard-name'/> IN <IN>${shard-names}</IN>
+					AND <FIELD name='cluster-id'/> = ct.id
+					AND ct.cluster_name = ${cluster-name}
+					AND ct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='delete-shards-batch' type='UPDATE' batch='true'>
 				<param name='id'/>
 				<param name='shard-name'/>
@@ -479,10 +627,14 @@
 	</entity>
 
 	<entity name="dc-cluster-shard-tbl" table="DC_CLUSTER_SHARD_TBL" alias="dcst">
+		<member name="cluster-count" value-type="long" select-expr="COUNT(distinct dcst.dc_cluster_id) `cluster-count`" all="false"/>
+		<member name="shard-count" value-type="long" select-expr="COUNT(distinct dcst.shard_id) `cluster-count`" all="false"/>
+
 		<var name="dc-id" value-type="Long"/>
 		<var name="dc-name" value-type="String"/>
 		<var name="cluster-name" value-type="String"/>
 		<var name="shard-name" value-type="String"/>
+		<var name="cluster-types" value-type="java.util.Set&lt;String&gt;" />
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
@@ -493,6 +645,10 @@
 		<readsets>
 			<readset name="SENTINEL_ID">
 				<member name="setinel-id"/>
+			</readset>
+			<readset name="CLUSTER_COUNT_AND_SHARD_COUNT">
+				<member name="cluster-count" />
+				<member name="shard-count" />
 			</readset>
 			<readset name="DC_CLUSTER_SHARD_META_INFO">
 				<readset-ref name="SENTINEL_ID"/>
@@ -600,6 +756,27 @@
 					]]>
 				</statement>
 			</query>
+			<query name='find-all-by-dc-id-and-in-cluster-types' type='SELECT' multiple='true'>
+				<param name="dc-id"/>
+				<param name="cluster-types"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>, <TABLE name='dc-cluster-info'/>, <TABLE name='redis-info'/>, <TABLE name='shard-info'/>
+					WHERE dct.dc_id = ${dc-id}
+					AND ct.cluster_type in <IN>${cluster-types}</IN>
+					AND dct.cluster_id = ct.id
+					AND <FIELD name='dc-cluster-id'/> = dct.dc_cluster_id
+					AND <FIELD name='shard-id' /> = st2.id
+					AND <FIELD name='dc-cluster-shard-id'/> = rt.dc_cluster_shard_id
+					AND st2.deleted = 0
+					AND rt.deleted = 0
+					AND ct.deleted = 0
+					AND dct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='insert-batch' type='INSERT' batch='true'>
 				<statement>
 					<![CDATA[
@@ -626,10 +803,12 @@
 		<!-- Add two constant below to fix bug, that when use h2 db in unit/integration test -->
 		<!-- RedisService.updateRedis() will fail, due to h2 db not recognize sequential insert with id of 0 -->
 		<member name="id" field="id" value-type="Long" length="20" nullable="true" key="true" auto-increment="true" />
+		<member name="count" value-type="long" select-expr="COUNT(rt.id) count" all="false"/>
 		<var name="key-id" value-type="Long" key-member="id" />
 
 		<var name="dc-name" value-type="String"/>
 		<var name="cluster-name" value-type="String"/>
+		<var name="keeper-container-id" value-type="long" />
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
@@ -651,9 +830,49 @@
 				<member name="redis-master"/>
 				<member name="keepercontainer-id"/>
 			</readset>
+			<readset name="CONTAINER_ID">
+				<member name="keepercontainer-id" />
+			</readset>
+			<readset name="CONTAINER_KEEPER_COUNT">
+				<member name="count" />
+			</readset>
+			<readset name="CONTAINER_LOAD" >
+				<readset-ref name="CONTAINER_ID" />
+				<readset-ref name="CONTAINER_KEEPER_COUNT" />
+				<readset-ref name="CLUSTER_COUNT_AND_SHARD_COUNT" relation-name="dc-cluster-shard-info" />
+			</readset>
+			<readset name="CLUSTER_ID">
+				<readset-ref name="CLUSTER_ID" relation-name="dc-cluster-info" />
+			</readset>
 		</readsets>
 
 		<query-defs>
+			<query name='find-dc-cluster-by-keeper-container' type='SELECT' multiple='true'>
+				<param name="keeper-container-id" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-shard-info' />, <TABLE name='dc-cluster-info' />
+					WHERE <FIELD name='keepercontainer-id' /> = ${keeper-container-id}
+					AND <FIELD name='deleted' /> = 0
+					AND <FIELD name='dc-cluster-shard-id' /> = dcst.dc_cluster_shard_id
+					AND dcst.dc_cluster_id=dct.dc_cluster_id
+        			]]>
+				</statement>
+			</query>
+			<query name='count-container-keeper-and-cluster-and-shard' type='SELECT' multiple='true'>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-shard-info' />
+					WHERE <FIELD name='dc-cluster-shard-id' /> = dcst.dc_cluster_shard_id
+					AND <FIELD name='redis-role' /> = 'keeper'
+					AND <FIELD name='deleted' /> = 0
+					AND dcst.deleted = 0
+					GROUP BY <FIELD name='keepercontainer-id' />
+        			]]>
+				</statement>
+			</query>
 
 			<query name="find-all-by-dc-cluster-name" type="SELECT" multiple="true">
 				<param name="dc-name"/>
@@ -764,7 +983,7 @@
 				<statement>
 					<![CDATA[
 					UPDATE <TABLE/>
-        			SET <FIELD name='deleted'/> = 1, <FIELD name='run-id'/> = ${run-id}
+        			SET <FIELD name='deleted'/> = 1, <FIELD name='run-id'/> = ${run-id}, <FIELD name='deleted-at'/> = UNIX_TIMESTAMP()
        				WHERE <FIELD name='id'/> = ${id}
         			AND <FIELD name='deleted'/> = 0
         			]]>
@@ -883,6 +1102,13 @@
 			</readset>
 		</readsets>
 
+		<updatesets>
+			<updateset name="ADDRESS">
+				<member name="setinel-id"/>
+				<member name="setinel-address"/>
+			</updateset>
+		</updatesets>
+
 		<query-defs>
 			<query name="find-by-dc-id" type="SELECT" multiple="true">
 				<param name="dc-id"/>
@@ -930,6 +1156,26 @@
 					]]>
 				</statement>
 			</query>
+
+			<query name="update-sentinel-addr" type="UPDATE" batch="false">
+				<statement>
+					<![CDATA[
+						UPDATE <TABLE/>
+						SET <FIELD name='setinel-address'/> = ${setinel-address}
+						WHERE <FIELD name='setinel-id'/> = ${setinel-id}
+						]]>
+				</statement>
+			</query>
+
+			<query name="delete-sentinel" type="UPDATE" batch="false">
+				<statement>
+					<![CDATA[
+						UPDATE <TABLE/>
+						SET <FIELD name='deleted'/> = 1
+						WHERE <FIELD name='setinel-id'/> = ${setinel-id}
+						]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -941,6 +1187,7 @@
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="keeper-info" entity-name="redis-tbl" entity-alias="kit"/>
+		<relation name="org-info" entity-name="organization-tbl" entity-alias="ot" />
 
 		<readsets>
 			<readset name="KEEPER_COUNT">
@@ -957,6 +1204,18 @@
 				<member name="keepercontainer-dc"/>
 				<member name="count"/>
 				<member name="keepercontainer-org-id" />
+			</readset>
+
+			<readset name="CONTAINER_ADDRESS">
+				<member name='keepercontainer-id'/>
+				<member name='keepercontainer-ip'/>
+				<member name='keepercontainer-port'/>
+			</readset>
+
+			<readset name="BASE_INFO">
+				<readset-ref name="CONTAINER_ADDRESS" />
+				<readset-ref name="NAME" relation-name="org-info" />
+				<readset-ref name="NAME" relation-name="dc-info" />
 			</readset>
 		</readsets>
 		<query-defs>
@@ -1033,6 +1292,17 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-container-base-info" type="SELECT" multiple="true" >
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE /> LEFT JOIN <TABLE name='org-info' /> on <FIELD name='keepercontainer-org-id' /> = ot.id,
+						<TABLE name='dc-info' />
+					where <FIELD name='deleted' /> = 0
+					and <FIELD name='keepercontainer-dc' /> = dt.id
+					]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -1041,12 +1311,20 @@
 		
 		<relation name="redundant-clusters" entity-name="migration-cluster-tbl" entity-alias="mct"/>
 		<relation name="redundant-shards" entity-name="migration-shard-tbl" entity-alias="mst"/>
-		
+
+		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
+
 		<readsets>
+			<readset name="COUNT">
+				<member name="count" />
+			</readset>
 			<readset name="FULL_ALL">
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="redundant-clusters"/>
 				<readset-ref name="FULL" relation-name="redundant-shards"/>
+			</readset>
+			<readset name="ID">
+				<member name="id" />
 			</readset>
 		</readsets>
 		
@@ -1059,6 +1337,15 @@
 					FROM <TABLE/>
 					WHERE <FIELD name='event-tag'/> = ${event-tag}
 					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-all" type="SELECT">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
 			</query>
@@ -1115,19 +1402,152 @@
 	
 	<entity name="migration-cluster-tbl" table="migration_cluster_tbl" alias="mct">
 		<var name="event-id" value-type="long"/>
+		<var name="size" value-type="long" />
+		<var name="offset" value-type="long" />
+		<var name="operator" value-type="String" />
+
+		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
 
 		<relation name="cluster" entity-name="cluster-tbl" entity-alias="ct"/>
 		<relation name="migration-event" entity-name="migration-event-tbl" entity-alias="met"/>
 		<relation name="migration-shards" entity-name="migration-shard-tbl" entity-alias="mst" multiple="true"/>
 		
 		<readsets>
+			<readset name="COUNT" >
+				<member name="count" />
+			</readset>
+			<readset name="STATUS" >
+				<member name="status" />
+			</readset>
 			<readset name="FULL_ALL">
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="cluster"/>
+				<readset-ref name="FULL" relation-name="migration-event" />
+			</readset>
+			<readset name="EVENT_WITH_CLUSTER">
+				<readset-ref name="STATUS"/>
+				<readset-ref name="FULL" relation-name="migration-event" />
+				<readset-ref name="NAME" relation-name="cluster" />
 			</readset>
 		</readsets>
 		
 		<query-defs>
+			<query name="find-latest-migration-clusters" type="SELECT" multiple="true">
+				<param name="data-change-last-time"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted' /> = 0
+					AND <FIELD name='data-change-last-time' /> > ${data-change-last-time}
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters" type="SELECT" multiple="true">
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM (<TABLE/> JOIN (
+						SELECT * FROM <TABLE name='migration-event' />
+						WHERE deleted = 0
+						ORDER BY id DESC LIMIT ${size} OFFSET ${offset}
+					) met on mct.migration_event_id=met.id)
+					JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+					order by met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-cluster" type="SELECT" multiple="true">
+				<param name="cluster-id" />
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM (<TABLE/>
+						JOIN (SELECT * FROM <TABLE name='migration-event' /> WHERE id in (
+							SELECT migration_event_id FROM (
+								SELECT migration_event_id from <TABLE />
+									WHERE <FIELD name='cluster-id' /> = ${cluster-id} AND deleted=0
+									ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}) event
+							)
+						) met on <FIELD name='migration-event-id' />=met.id)
+						JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+						ORDER BY met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-operator" type="SELECT" multiple="true">
+				<param name="operator"/>
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM (<TABLE/>
+						JOIN (SELECT * FROM <TABLE name='migration-event' /> WHERE id in (
+							SELECT migration_event_id FROM (
+								SELECT migration_event_id from <TABLE />, <TABLE name='migration-event' />
+									WHERE <FIELD name='migration-event-id'/> = met.id
+									AND met.operator = ${operator} AND <FIELD name='deleted' /> = 0
+									ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}) event
+							)
+						) met on <FIELD name='migration-event-id' />=met.id)
+						JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+						ORDER BY met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-status" type="SELECT" multiple="true">
+				<param name="status"/>
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM (<TABLE/>
+						JOIN (SELECT * FROM <TABLE name='migration-event' /> WHERE id in (
+							SELECT migration_event_id FROM (
+								SELECT migration_event_id from <TABLE />
+									WHERE <FIELD name='status' /> = ${status} AND deleted=0
+									ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}) event
+							)
+						) met on <FIELD name='migration-event-id' />=met.id)
+						JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+						ORDER BY met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="count-all-by-cluster" type="SELECT">
+				<param name="cluster-id" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>
+					WHERE <FIELD name='cluster-id'/> = ${cluster-id}
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-all-by-operator" type="SELECT">
+				<param name="operator" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>, <TABLE name='migration-event' />
+					WHERE <FIELD name='migration-event-id'/> = met.id
+					AND met.operator = ${operator}
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-all-by-status" type="SELECT">
+				<param name="status" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>
+					WHERE <FIELD name='status'/> = ${status}
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
 			<query name="find-by-event-id" type="SELECT" multiple="true">
 				<param name="event-id"/>
 				<statement>
@@ -1150,11 +1570,9 @@
 				<statement>
 					<![CDATA[
 					SELECT <FIELDS/>
-					FROM <TABLE/>,<TABLE name="migration-event"/>
+					FROM <TABLE/>
 					WHERE <FIELD name='migration-event-id'/> = ${event-id}
 					AND <FIELD name="cluster-id"/> = ${cluster-id}
-					AND met.id = ${event-id}
-					AND met.deleted = 0
 					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
@@ -1280,6 +1698,15 @@
 			</readset>
 		</readsets>
 
+		<updatesets>
+			<updateset name="VALUE_AND_UNTIL" >
+				<member name="value" />
+				<member name="until" />
+				<member name="latest-update-user" />
+				<member name ="latest-update-ip" />
+			</updateset>
+		</updatesets>
+
 		<query-defs>
 			<query name="update-by-key" type="UPDATE" batch="false">
 				<param name="key"/>
@@ -1293,7 +1720,7 @@
 				</statement>
 			</query>
 
-			<query name="update-val-and-until-by-key" type="UPDATE" batch="false">
+			<query name="update-val-and-until-by-key-and-sub-key" type="UPDATE" batch="false">
 				<statement>
 					<![CDATA[
 					UPDATE <TABLE/>
@@ -1302,21 +1729,52 @@
 					<FIELD name='latest-update-user' /> = ${latest-update-user},
 					<FIELD name='latest-update-ip' /> = ${latest-update-ip}
 					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='sub-key'/> = ${sub-key}
 					]]>
 				</statement>
 			</query>
 
-
-			<query name="find-by-key" type="SELECT" multiple="false">
+			<query name="find-all-by-key-and-value-and-until-after" type="SELECT" multiple="true">
 				<param name="key"/>
+				<param name="value"/>
+				<param name="until"/>
 				<statement>
 					<![CDATA[
 					SELECT <FIELDS/>
 					FROM <TABLE/>
 					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='value'/> = ${value}
+					AND <FIELD name='until'/> > ${until}
 					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
+			</query>
+
+			<query name="find-by-key-and-sub-key" type="SELECT" multiple="false">
+				<param name="key"/>
+				<param name="sub-key"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='sub-key'/> = ${sub-key}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+
+			<query name="update-by-key-and-sub-key-and-change-time" type="UPDATE">
+				<param name="key"/>
+				<param name="sub-key"/>
+				<param name="data-change-last-time" />
+				<statement><![CDATA[UPDATE <TABLE/>
+					SET <FIELDS/>
+					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='sub-key'/> = ${sub-key}
+					AND <FIELD name='deleted'/> = 0
+					AND <FIELD name='data-change-last-time'/> = ${data-change-last-time}
+				]]></statement>
 			</query>
 		</query-defs>
 	</entity>
@@ -1332,6 +1790,9 @@
 			<readset name="id-and-name">
 				<member name='id'/>
 				<member name='org-name'/>
+			</readset>
+			<readset name="NAME">
+				<member name="org-name"/>
 			</readset>
 		</readsets>
 
@@ -1541,6 +2002,19 @@
 					SET <FIELD name='deleted'/> = 1
 					WHERE <FIELD name='id'/> = ${id}
 					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+	<entity name="zone-tbl" table="zone_tbl" alias="zonetbl">
+		<query-defs>
+			<query name="find-all-zones" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
 			</query>

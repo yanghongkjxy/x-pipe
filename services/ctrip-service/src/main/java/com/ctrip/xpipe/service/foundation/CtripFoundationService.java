@@ -2,6 +2,9 @@ package com.ctrip.xpipe.service.foundation;
 
 import com.ctrip.framework.foundation.Foundation;
 import com.ctrip.xpipe.api.foundation.FoundationService;
+import com.ctrip.xpipe.utils.VisibleForTesting;
+
+import java.util.Map;
 
 /**
  * @author wenchao.meng
@@ -10,12 +13,18 @@ import com.ctrip.xpipe.api.foundation.FoundationService;
  */
 public class CtripFoundationService implements FoundationService{
 	
-	private static final String DATA_CENTER_KEY = "XPIPE_DATA_CENTER";
+	protected static final String DATA_CENTER_KEY = "XPIPE_DATA_CENTER";
+
+	protected static final String GROUP_ID_KEY = "XPIPE_GROUP_ID";
+
+	private static FoundationConfig config = new FoundationConfig();
 
 	@Override
 	public String getDataCenter() {
-		
-		return System.getProperty(DATA_CENTER_KEY, Foundation.server().getDataCenter());
+		Map<String, String> groupDcMap = config.getGroupDcMap();
+		String groupId = System.getProperty(GROUP_ID_KEY, Foundation.group().getId());
+		if (null != groupDcMap && groupDcMap.containsKey(groupId)) return groupDcMap.get(groupId);
+		else return System.getProperty(DATA_CENTER_KEY, Foundation.server().getDataCenter());
 	}
 
 	@Override
@@ -28,9 +37,27 @@ public class CtripFoundationService implements FoundationService{
 		return Foundation.net().getHostAddress();
 	}
 
+	public int getHttpPort() {
+		return Foundation.web().getHttpPort();
+	}
+
+	@Override
+	public String getGroupId() {
+		return Foundation.group().getId();
+	}
+
+	public String getEnvironment() {
+		return Foundation.server().getEnv().getName();
+	}
+
 	@Override
 	public int getOrder() {
 		return HIGHEST_PRECEDENCE;
+	}
+
+	@VisibleForTesting
+	protected static void setConfig(FoundationConfig config) {
+		CtripFoundationService.config = config;
 	}
 
 }

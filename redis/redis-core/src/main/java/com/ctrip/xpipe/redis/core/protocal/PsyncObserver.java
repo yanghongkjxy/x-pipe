@@ -13,8 +13,9 @@ public interface PsyncObserver {
 	
 	/**
 	 * get FULLSYNC response
+	 * @param masterRdbOffset
 	 */
-	void onFullSync();
+	void onFullSync(long masterRdbOffset);
 
 	void reFullSync();
 
@@ -24,7 +25,7 @@ public interface PsyncObserver {
 	 * @param offset
 	 * @throws IOException
 	 */
-	void beginWriteRdb(EofType eofType, long masterRdbOffset) throws IOException;
+	void beginWriteRdb(EofType eofType, String replId, long masterRdbOffset) throws IOException;
 
 
 	void endWriteRdb();

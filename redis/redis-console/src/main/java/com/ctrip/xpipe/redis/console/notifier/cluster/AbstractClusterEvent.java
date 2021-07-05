@@ -19,14 +19,17 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
 
     private String clusterName;
 
+    private long orgId;
+
     private List<ShardEvent> shardEvents;
 
     private List<Observer> observers;
 
     private ExecutorService executor;
 
-    protected AbstractClusterEvent(String clusterName, ExecutorService executor) {
+    protected AbstractClusterEvent(String clusterName, long orgId, ExecutorService executor) {
         this.clusterName = clusterName;
+        this.orgId = orgId;
         this.executor = executor;
         this.shardEvents = Lists.newLinkedList();
         this.observers = Lists.newArrayListWithExpectedSize(5);
@@ -35,6 +38,11 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
     @Override
     public String getClusterName() {
         return this.clusterName;
+    }
+
+    @Override
+    public long getOrgId() {
+        return this.orgId;
     }
 
     @Override
@@ -62,7 +70,7 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
             executor.execute(new AbstractExceptionLogTask() {
                 @Override
                 protected void doRun() throws Exception {
-                    logger.info("[onEvent] execute observer: {}", observer.getClass());
+                    getLogger().info("[onEvent] execute observer: {}", observer.getClass());
                     observer.update(getClusterEventType(), getSelf());
                 }
             });

@@ -18,6 +18,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.function.BiPredicate;
 
+import static com.ctrip.xpipe.redis.core.protocal.RedisProtocol.KEEPER_PORT_DEFAULT;
+
 /**
  * @author wenchao.meng
  *         <p>
@@ -27,7 +29,7 @@ import java.util.function.BiPredicate;
 public class DefaultKeeperAdvancedService extends AbstractConsoleService<RedisTblDao> implements KeeperAdvancedService {
 
   @Autowired
-  private KeepercontainerService keepercontainerService;
+  private KeeperContainerService keeperContainerService;
 
   @Autowired
   private RedisService redisService;
@@ -37,7 +39,7 @@ public class DefaultKeeperAdvancedService extends AbstractConsoleService<RedisTb
 
   @Override
   public List<KeeperBasicInfo> findBestKeepers(String dcName, String clusterName) {
-    return findBestKeepers(dcName, RedisProtocol.REDIS_PORT_DEFAULT, (host, port) -> true, clusterName);
+    return findBestKeepers(dcName, KEEPER_PORT_DEFAULT, (host, port) -> true, clusterName);
   }
 
   @Override
@@ -52,7 +54,7 @@ public class DefaultKeeperAdvancedService extends AbstractConsoleService<RedisTb
     List<KeeperBasicInfo> result = new LinkedList<>();
 
     List<KeepercontainerTbl> keepercontainerTbls =
-        keepercontainerService.findBestKeeperContainersByDcCluster(dcName, clusterName);
+        keeperContainerService.findBestKeeperContainersByDcCluster(dcName, clusterName);
     if (keepercontainerTbls.size() < returnCount) {
       throw new IllegalStateException(
           "Organization keepers size:" + keepercontainerTbls.size() + ", but we need:" + returnCount);

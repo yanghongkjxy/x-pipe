@@ -10,7 +10,6 @@ import com.ctrip.xpipe.exception.XpipeRuntimeException;
 import com.ctrip.xpipe.monitor.CatTransactionMonitor;
 import com.ctrip.xpipe.utils.StringUtil;
 import com.ctrip.xpipe.utils.VisibleForTesting;
-import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,10 +20,10 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static com.ctrip.xpipe.service.email.CtripAlertEmailTemplate.EMAIL_TYPE_ALERT;
 
 /**
  * @author chen.zhu
@@ -39,10 +38,9 @@ public class CtripPlatformEmailService implements EmailService {
 
     private static final String TYPE = "SOA.EMAIL.SERVICE";
 
-    private static EmailServiceClient client = EmailServiceClient.getInstance();
+    private static EmailConfig config = new EmailConfig();
 
-    private static final ScheduledExecutorService scheduled = Executors.newSingleThreadScheduledExecutor(
-            XpipeThreadFactory.create(CtripPlatformEmailService.class.getSimpleName()));
+    private static EmailServiceClient client = EmailServiceClient.getInstance();
 
     @Override
     public void sendEmail(Email email) {
@@ -64,17 +62,12 @@ public class CtripPlatformEmailService implements EmailService {
             }
 
         } catch (Exception e) {
-            logger.error("[sendEmail]Email service Error\n {}", e);
-            Throwable th = e;
-            while(th.getCause() instanceof XpipeRuntimeException) {
-                th = th.getCause();
-            }
-            throw new XpipeRuntimeException(th.getMessage());
+            logger.error("[sendEmail]Email service Error\n", e);
         }
     }
 
     private static final Pattern VALID_EMAIL_ADDRESS_REGEX =
-            Pattern.compile("^[A-Z0-9._%+-]+@Ctrip.com$", Pattern.CASE_INSENSITIVE);
+            Pattern.compile("^[A-Z0-9._%+-]+@C?trip.com$", Pattern.CASE_INSENSITIVE);
 
     @Override
     public CheckEmailResponse checkEmailAddress(String address) {
@@ -83,7 +76,7 @@ public class CtripPlatformEmailService implements EmailService {
         if(result) {
             return new CheckEmailResponse(true);
         } else {
-            return new CheckEmailResponse(false, "Emails should be ctrip emails and separated by comma or semicolon");
+            return new CheckEmailResponse(false, "Emails should be ctrip/trip emails and separated by comma or semicolon");
         }
     }
 
@@ -104,12 +97,12 @@ public class CtripPlatformEmailService implements EmailService {
             String emailIDListStr = (String) response.getProperties().get(EmailResponse.KEYS.CHECK_INFO.name());
             List<String> emailIDList = decodeListString(emailIDListStr);
             GetEmailStatusResponse emailStatusResponse = client.getEmailStatus(
-                    new GetEmailStatusRequest(CtripAlertEmailTemplate.SEND_CODE, emailIDList));
+                    new GetEmailStatusRequest(CtripAlertEmailTemplate.SEND_CODE, emailIDList, EMAIL_TYPE_ALERT));
 
-            logger.info("[checkAsyncEmailResult]Email sent out result: {}", emailStatusResponse);
+            logger.debug("[checkAsyncEmailResult]Email sent out result: {}", emailStatusResponse);
             return emailStatusResponse.getResultCode() == 1;
         }catch (Exception e) {
-            logger.error("check email send response error: {}", e);
+            logger.error("check email send response error: ", e);
         }
         return false;
     }
@@ -202,7 +195,7 @@ public class CtripPlatformEmailService implements EmailService {
         for(String str : strs) {
             sb.append(str).append(",");
         }
-        sb.deleteCharAt(sb.length() - 1);
+        if (sb.length() > 0) sb.deleteCharAt(sb.length() - 1);
         return sb.toString();
     }
 

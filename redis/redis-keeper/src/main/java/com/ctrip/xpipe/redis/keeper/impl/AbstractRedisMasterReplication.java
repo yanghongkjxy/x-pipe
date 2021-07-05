@@ -4,8 +4,9 @@ import com.ctrip.xpipe.api.command.Command;
 import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.api.command.CommandFutureListener;
 import com.ctrip.xpipe.api.endpoint.Endpoint;
-import com.ctrip.xpipe.api.proxy.ProxyEnabled;
+import com.ctrip.xpipe.api.monitor.EventMonitor;
 import com.ctrip.xpipe.api.proxy.ProxyConnectProtocol;
+import com.ctrip.xpipe.api.proxy.ProxyEnabled;
 import com.ctrip.xpipe.command.CommandExecutionException;
 import com.ctrip.xpipe.command.FailSafeCommandWrapper;
 import com.ctrip.xpipe.command.SequenceCommandChain;
@@ -25,14 +26,17 @@ import com.ctrip.xpipe.redis.core.protocal.cmd.AbstractRedisCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.Replconf;
 import com.ctrip.xpipe.redis.core.protocal.cmd.Replconf.ReplConfType;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
-import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.ProxyEndpointSelector;
 import com.ctrip.xpipe.redis.keeper.RdbDumper;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisMaster;
 import com.ctrip.xpipe.redis.keeper.RedisMasterReplication;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.KeeperResourceManager;
+import com.ctrip.xpipe.redis.keeper.exception.psync.PsyncCommandFailException;
+import com.ctrip.xpipe.redis.keeper.exception.psync.PsyncMasterDisconnectedException;
 import com.ctrip.xpipe.redis.keeper.netty.NettySlaveHandler;
+import com.ctrip.xpipe.redis.keeper.ratelimit.LeakyBucketBasedMasterReplicationListener;
 import com.ctrip.xpipe.utils.ChannelUtil;
 import com.ctrip.xpipe.utils.VisibleForTesting;
 import io.netty.bootstrap.Bootstrap;
@@ -98,23 +102,31 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 
 	private int commandTimeoutMilli;
 
-	private ProxyResourceManager proxyResourceManager;
+	protected RedisMasterReplicationObserver replicationObserver;
+
+	protected KeeperResourceManager resourceManager;
 
 	public AbstractRedisMasterReplication(RedisKeeperServer redisKeeperServer, RedisMaster redisMaster, NioEventLoopGroup nioEventLoopGroup,
-										  ScheduledExecutorService scheduled, int replTimeoutMilli, ProxyResourceManager proxyResourceManager) {
+										  ScheduledExecutorService scheduled, int replTimeoutMilli, KeeperResourceManager resourceManager) {
 
 		this.redisKeeperServer = redisKeeperServer;
 		this.redisMaster = redisMaster;
 		this.nioEventLoopGroup = nioEventLoopGroup;
 		this.replTimeoutMilli = replTimeoutMilli;
 		this.scheduled = scheduled;
-		this.proxyResourceManager = proxyResourceManager;
+		this.resourceManager = resourceManager;
 		this.commandTimeoutMilli = initCommandTimeoutMilli();
 	}
 
 	public AbstractRedisMasterReplication(RedisKeeperServer redisKeeperServer, RedisMaster redisMaster, NioEventLoopGroup nioEventLoopGroup,
-										  ScheduledExecutorService scheduled, ProxyResourceManager proxyResourceManager) {
-		this(redisKeeperServer, redisMaster, nioEventLoopGroup, scheduled, DEFAULT_REPLICATION_TIMEOUT_MILLI, proxyResourceManager);
+										  ScheduledExecutorService scheduled, KeeperResourceManager resourceManager) {
+		this(redisKeeperServer, redisMaster, nioEventLoopGroup, scheduled, DEFAULT_REPLICATION_TIMEOUT_MILLI, resourceManager);
+	}
+
+	@Override
+	protected void doInitialize() throws Exception {
+		super.doInitialize();
+		updateReplicationObserver(new LeakyBucketBasedMasterReplicationListener(this, redisKeeperServer, resourceManager, scheduled));
 	}
 
 	public RedisMaster getRedisMaster() {
@@ -174,18 +186,26 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 			doConnect(b);
 		} catch (Exception e) {
 			logger.error("[doConnect0] ", e);
-
-			scheduled.schedule(new Runnable() {
-				@Override
-				public void run() {
-					try{
-						connectWithMaster();
-					}catch(Throwable th){
-						logger.error("[doConnect0][connectUntilConnected]" + AbstractRedisMasterReplication.this, th);
-					}
-				}
-			}, masterConnectRetryDelaySeconds, TimeUnit.SECONDS);
+			scheduleReconnect(masterConnectRetryDelaySeconds*1000);
 		}
+	}
+
+	protected void scheduleReconnect(int timeMilli) {
+
+		if (!(getLifecycleState().isStarting() || getLifecycleState().isStarted())) {
+			logger.info("[scheduleReconnect][do not connect, is stopped!!]{}", redisMaster.masterEndPoint());
+			return;
+		}
+		scheduled.schedule(new AbstractExceptionLogTask() {
+			@Override
+			public void doRun() {
+				try{
+					connectWithMaster();
+				}catch(Throwable th){
+					logger.error("[scheduleReconnect]" + AbstractRedisMasterReplication.this, th);
+				}
+			}
+		}, timeMilli, TimeUnit.MILLISECONDS);
 	}
 
 	protected abstract void doConnect(Bootstrap b);
@@ -200,6 +220,11 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 		}
 	}
 
+	@Override
+	public void reconnectMaster() {
+		throw new UnsupportedOperationException();
+	}
+
 	@VisibleForTesting
 	protected boolean isMasterConnectThroughProxy() {
 		return redisMaster.masterEndPoint() instanceof ProxyEnabled;
@@ -209,7 +234,7 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 		ProxyEnabledEndpoint endpoint = (ProxyEnabledEndpoint) redisMaster.masterEndPoint();
 		ProxyConnectProtocol protocol = endpoint.getProxyProtocol();
 		if(selector == null) {
-			selector = proxyResourceManager.createProxyEndpointSelector(protocol);
+			selector = resourceManager.createProxyEndpointSelector(protocol);
 		}
 		ProxyEndpoint nextHop = selector.nextHop();
 		logger.info("[tryConnectThroughProxy] connect endpoint: {}", nextHop.getUri());
@@ -225,9 +250,13 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 					String.format("not stated: %s, do not receive message:%d, %s", getLifecycleState().getPhaseName(), byteBuf.readableBytes(), ByteBufUtils.readToString(byteBuf)));
 		}
 
+		onReceiveMessage(byteBuf.readableBytes());
+
 		repl_transfer_lastio = System.currentTimeMillis();
 		clientPool.getObject().handleResponse(channel, byteBuf);
 	}
+
+	protected void onReceiveMessage(int messageLength){}
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	@Override
@@ -236,14 +265,16 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 		connectedTime = System.currentTimeMillis();
 		this.masterChannel = channel;
 		clientPool = new FixedObjectPool<NettyClient>(new DefaultNettyClient(channel));
-
+		if (replicationObserver != null) {
+			replicationObserver.onMasterConnected();
+		}
 		checkTimeout(channel);
 
 		if(isMasterConnectThroughProxy()) {
 			ProxyEnabledEndpoint endpoint = (ProxyEnabledEndpoint) redisMaster.masterEndPoint();
 			channel.writeAndFlush(endpoint.getProxyProtocol().output());
 		}
-		
+
 		checkKeeper();
 
 		SequenceCommandChain chain = new SequenceCommandChain(false);
@@ -253,7 +284,7 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 		Replconf capa = new Replconf(clientPool, ReplConfType.CAPA, scheduled, commandTimeoutMilli,
 				CAPA.EOF.toString(), CAPA.PSYNC2.toString());
 		chain.add(new FailSafeCommandWrapper<>(capa));
-		
+
 		try {
 			executeCommand(chain).addListener(new CommandFutureListener() {
 
@@ -301,12 +332,12 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 						}
 					}
 		}, replTimeoutMilli, replTimeoutMilli, TimeUnit.MILLISECONDS);
-		
+
 		channel.closeFuture().addListener(new ChannelFutureListener() {
-			
+
 			@Override
 			public void operationComplete(ChannelFuture future) throws Exception {
-				
+
 				logger.info("[cancelTimeout]{}ms, {}", replTimeoutMilli, channel);
 				repliTimeoutCheckFuture.cancel(true);
 			}
@@ -314,10 +345,18 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	}
 
 	@Override
-	public void masterDisconntected(Channel channel) {
+	public void masterDisconnected(Channel channel) {
 
-		logger.info("[masterDisconntected]{}", channel);
-		dumpFail(new IOException("master closed:" + channel));
+		logger.info("[masterDisconnected]{}", channel);
+		dumpFail(new PsyncMasterDisconnectedException(channel));
+	}
+
+	@Override
+	public boolean canSendPsync() {
+		if (replicationObserver != null) {
+			return replicationObserver.canSendPsync();
+		}
+		return true;
 	}
 
 	protected <V> CommandFuture<V> executeCommand(Command<V> command) {
@@ -337,8 +376,15 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	}
 
 	protected void sendReplicationCommand() throws CommandExecutionException {
-		executeCommand(psyncCommand());
+		if(canSendPsync()) {
+			executeCommand(psyncCommand());
+		} else {
+			EventMonitor.DEFAULT.logAlertEvent("[lack-token]" + redisKeeperServer.getShardId());
+			doWhenCannotPsync();
+		}
 	}
+
+	protected abstract void doWhenCannotPsync();
 
 	protected Psync psyncCommand() {
 
@@ -348,6 +394,7 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 		}
 
 		Psync psync = createPsync();
+		psync.addPsyncObserver(replicationObserver);
 		psync.future().addListener(new CommandFutureListener<Object>() {
 
 			@Override
@@ -356,7 +403,7 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 				if (!commandFuture.isSuccess()) {
 					logger.error("[operationComplete][psyncCommand][fail]" + AbstractRedisMasterReplication.this, commandFuture.cause());
 
-					dumpFail(commandFuture.cause());
+					dumpFail(new PsyncCommandFailException(commandFuture.cause()));
 					psyncFail(commandFuture.cause());
 				}
 			}
@@ -375,6 +422,11 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	}
 
 	@Override
+	public void updateReplicationObserver(RedisMasterReplicationObserver observer) {
+		this.replicationObserver = observer;
+	}
+
+	@Override
 	protected void doStop() throws Exception {
 
 		stopReplication();
@@ -384,8 +436,12 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	protected void stopReplication() {
 
 		logger.info("[stopReplication]{}", redisMaster.masterEndPoint());
+		disconnectWithMaster();
+	}
+
+	protected void disconnectWithMaster() {
 		if (masterChannel != null && masterChannel.isOpen()) {
-			logger.info("[stopReplication][doStop]{}", masterChannel);
+			logger.info("[disconnectWithMaster]{}", masterChannel);
 			masterChannel.close();
 		}
 	}
@@ -393,15 +449,15 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	@Override
 	public String toString() {
 
-		return String.format("%s(redisMaster:%s, %s)", getClass().getSimpleName(), redisMaster, ChannelUtil.getDesc(masterChannel));
+		return String.format("%s(M:%s, %s)", getClass().getSimpleName(), redisMaster, ChannelUtil.getDesc(masterChannel));
 	}
 
 	@Override
-	public void onFullSync() {
-		doOnFullSync();
+	public void onFullSync(long masterRdbOffset) {
+		doOnFullSync(masterRdbOffset);
 	}
 
-	protected abstract void doOnFullSync();
+	protected abstract void doOnFullSync(long masterRdbOffset);
 
 	@Override
 	public void reFullSync() {
@@ -411,17 +467,16 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	protected abstract void doReFullSync();
 
 	@Override
-	public void beginWriteRdb(EofType eofType, long masterRdbOffset) throws IOException {
+	public void beginWriteRdb(EofType eofType, String replId, long masterRdbOffset) throws IOException {
 
 		doBeginWriteRdb(eofType, masterRdbOffset);
-		rdbDumper.get().beginReceiveRdbData(masterRdbOffset);
+		rdbDumper.get().beginReceiveRdbData(replId, masterRdbOffset);
 	}
 
 	protected abstract void doBeginWriteRdb(EofType eofType, long masterRdbOffset) throws IOException;
 
 	@Override
 	public void endWriteRdb() {
-
 		dumpFinished();
 		doEndWriteRdb();
 	}
@@ -437,7 +492,6 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 
 	protected void dumpFinished() {
 		logger.info("[dumpFinished]{}", this);
-
 		RdbDumper dumper = rdbDumper.get();
 		if (dumper != null) {
 			rdbDumper.set(null);
@@ -446,7 +500,9 @@ public abstract class AbstractRedisMasterReplication extends AbstractLifecycle i
 	}
 
 	protected void dumpFail(Throwable th) {
-
+		if (replicationObserver != null) {
+			replicationObserver.onDumpFail(th);
+		}
 		RdbDumper dumper = rdbDumper.get();
 		if (dumper != null) {
 			rdbDumper.set(null);

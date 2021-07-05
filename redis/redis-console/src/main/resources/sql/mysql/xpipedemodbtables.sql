@@ -70,10 +70,12 @@ drop table if exists CLUSTER_TBL;
 CREATE TABLE `CLUSTER_TBL` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `cluster_name` varchar(128) NOT NULL DEFAULT 'default' COMMENT 'cluster name',
+  `cluster_type` varchar(32) NOT NULL DEFAULT 'one_way' COMMENT 'cluster type',
   `activedc_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'active dc id',
   `cluster_description` varchar(1024) NOT NULL DEFAULT 'nothing' COMMENT 'cluster description',
   `cluster_last_modified_time` varchar(40) NOT NULL DEFAULT '' COMMENT 'last modified tag',
   `status` varchar(24) NOT NULL DEFAULT 'normal' COMMENT 'cluster status',
+  `migration_event_id` bigint(20) unsigned NOT Null DEFAULT '0' COMMENT 'related migration event on processing',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   `is_xpipe_interested` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'is xpipe interested',
@@ -84,7 +86,9 @@ CREATE TABLE `CLUSTER_TBL` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `cluster_name` (`cluster_name`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
-  KEY `is_xpipe_interested` (`is_xpipe_interested`)
+  KEY `is_xpipe_interested` (`is_xpipe_interested`),
+  KEY `Deleted` (`deleted`),
+  KEY `Deleted_ClusterType` (`deleted`,`cluster_type`)
 ) DEFAULT CHARSET=utf8 COMMENT='clusters info';
 
 
@@ -101,7 +105,10 @@ CREATE TABLE `DC_CLUSTER_TBL` (
   PRIMARY KEY (`dc_cluster_id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `DcId` (`dc_id`),
-  KEY `ClusterId` (`cluster_id`)
+  KEY `ClusterId` (`cluster_id`),
+  KEY `DcIdPrimary` (`dc_id`,`dc_cluster_id`,`deleted`),
+  KEY `ClusterId_Deleted` (`cluster_id`,`deleted`),
+  KEY `DcId_Deleted` (`dc_id`,`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='dc cluster base info';
 
 
@@ -116,7 +123,8 @@ CREATE TABLE `SHARD_TBL` (
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
   KEY `DataChangeLastTime` (`DataChange_LastTime`),
-  KEY `cluster_id` (`cluster_id`)
+  KEY `ClusterId` (`cluster_id`),
+  KEY `Deleted` (`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='shard base info';
 
 
@@ -134,7 +142,10 @@ CREATE TABLE `DC_CLUSTER_SHARD_TBL` (
   PRIMARY KEY (`dc_cluster_shard_id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `DcClusterId` (`dc_cluster_id`),
-  KEY `ShardId` (`shard_id`)
+  KEY `ShardId` (`shard_id`),
+  KEY `ShardId_Deleted` (`shard_id`,`deleted`),
+  KEY `Deleted` (`deleted`),
+  KEY `DcClusterId_Deleted` (`dc_cluster_id`,`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='dc cluster shard base info';
 
 
@@ -154,10 +165,13 @@ CREATE TABLE `REDIS_TBL` (
   `keepercontainer_id` bigint(20) unsigned DEFAULT NULL COMMENT 'keepercontainer id',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  `deleted_at` int(11) NOT NULL DEFAULT '0' COMMENT 'deleted time',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `ip_port_deleted_at` (`redis_ip`,`redis_port`,`deleted_at`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `DcClusterShardId` (`dc_cluster_shard_id`),
-  KEY `keeper_active` (`keeper_active`)
+  KEY `keeper_active` (`keeper_active`),
+  KEY `DcClusterShardId_Deleted` (`dc_cluster_shard_id`,`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='redis base info';
 
 
@@ -185,8 +199,11 @@ drop table if exists migration_event_tbl;
 CREATE TABLE `migration_event_tbl` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `start_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'event start time',
+  `break` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'break or not',
   `operator` varchar(128) NOT NULL DEFAULT 'xpipe' COMMENT 'event operator',
   `event_tag` varchar(150) NOT NULL DEFAULT 'eventtag' COMMENT 'event mark tag',
+  `exec_lock` varchar(128) NOT NULL DEFAULT '' COMMENT 'idc which hold migration exec lock',
+  `lock_until` bigint(13) NOT NULL DEFAULT '0' COMMENT 'hold migration exec lock until',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
@@ -210,7 +227,9 @@ CREATE TABLE `migration_cluster_tbl` (
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
-  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+  KEY `DataChange_LastTime` (`DataChange_LastTime`),
+  KEY `ClusterId_MigrationEventId` (`cluster_id`,`migration_event_id`),
+  KEY `MigrationEventId` (`migration_event_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=51 DEFAULT CHARSET=utf8 COMMENT='migration cluster tbl';
 
 
@@ -226,7 +245,8 @@ CREATE TABLE `migration_shard_tbl` (
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
   `deleted` tinyint(4) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
-  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+  KEY `DataChange_LastTime` (`DataChange_LastTime`),
+  KEY `MigrationClusterId` (`migration_cluster_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8 COMMENT='migration events on specific shard';
 
 
@@ -235,6 +255,7 @@ drop table if exists config_tbl;
 CREATE TABLE `config_tbl` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `key` varchar(128) NOT NULL DEFAULT '' COMMENT 'key',
+  `sub_key` varchar(128) NOT NULL DEFAULT '' COMMENT 'sub_key',
   `value` varchar(1024) DEFAULT '' COMMENT 'value',
   `until` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'for potential use',
   `latest_update_user` varchar(512) DEFAULT '' COMMENT 'latest person who update the config',
@@ -244,7 +265,7 @@ CREATE TABLE `config_tbl` (
   `deleted` tinyint(4) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
-  UNIQUE KEY `key` (`key`)
+  UNIQUE KEY `key_sub_key` (`key`,`sub_key`)
 ) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8 COMMENT='xpipe config';
 
 INSERT INTO config_tbl (`key`, `value`, `desc`) VALUES ('sentinel.auto.process', 'true', '自动增删哨兵');

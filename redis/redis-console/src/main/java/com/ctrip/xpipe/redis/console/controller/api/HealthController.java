@@ -1,12 +1,15 @@
 package com.ctrip.xpipe.redis.console.controller.api;
 
-import com.ctrip.xpipe.api.codec.Codec;
+import com.ctrip.xpipe.api.foundation.FoundationService;
 import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.checker.controller.result.ActionContextRetMessage;
+import com.ctrip.xpipe.redis.checker.healthcheck.HealthChecker;
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
-import com.ctrip.xpipe.redis.console.healthcheck.*;
-import com.ctrip.xpipe.redis.console.healthcheck.actions.interaction.DefaultDelayPingActionCollector;
-import com.ctrip.xpipe.redis.console.healthcheck.actions.interaction.HEALTH_STATE;
-import com.google.common.collect.Lists;
+import com.ctrip.xpipe.redis.console.model.consoleportal.UnhealthyInfoModel;
+import com.ctrip.xpipe.redis.console.service.DelayService;
+import com.ctrip.xpipe.redis.console.service.RedisInfoService;
+import com.ctrip.xpipe.redis.console.service.impl.DefaultCrossMasterDelayService;
+import com.ctrip.xpipe.tuple.Pair;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,7 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
+import java.util.Map;
 
 /**
  * @author wenchao.meng
@@ -27,77 +30,56 @@ import java.util.List;
 public class HealthController extends AbstractConsoleController{
 
     @Autowired
-    private DefaultDelayPingActionCollector defaultDelayPingActionCollector;
+    private DelayService delayService;
 
     @Autowired
-    private HealthCheckInstanceManager instanceManager;
+    private DefaultCrossMasterDelayService crossMasterDelayService;
 
-    @RequestMapping(value = "/health/{ip}/{port}", method = RequestMethod.GET)
-    public HEALTH_STATE getHealthState(@PathVariable String ip, @PathVariable int port) {
+    @Autowired
+    private RedisInfoService infoService;
 
-        return defaultDelayPingActionCollector.getState(new HostPort(ip, port));
+    @RequestMapping(value = "/redis/delay/{redisIp}/{redisPort}", method = RequestMethod.GET)
+    public Long getReplDelayMillis(@PathVariable String redisIp, @PathVariable int redisPort) {
+        return delayService.getDelay(new HostPort(redisIp, redisPort));
     }
 
-    @RequestMapping(value = "/health/check/instance/{ip}/{port}", method = RequestMethod.GET)
-    public String getHealthCheckInstance(@PathVariable String ip, @PathVariable int port) {
-        RedisHealthCheckInstance instance = instanceManager.findRedisHealthCheckInstance(new HostPort(ip, port));
-        if(instance == null) {
-            return "Not found";
-        }
-        RedisHealthCheckInstanceModel model = new RedisHealthCheckInstanceModel(instance.toString());
-        for(HealthCheckAction action : instance.getHealthCheckActions()) {
-            HealthCheckActionModel actionModel = new HealthCheckActionModel(action.toString());
-            for(Object listener : ((AbstractHealthCheckAction) action).getListeners()) {
-                actionModel.addListener(listener.toString());
-            }
-            model.addAction(actionModel);
-        }
-        return Codec.DEFAULT.encode(model);
+    @RequestMapping(value = "/redis/info/local", produces = "application/json;charset=UTF-8", method = RequestMethod.GET)
+    public Map<HostPort, ActionContextRetMessage<Map<String, String>>> getLocalAllRedisInfo() {
+        return infoService.getLocalAllInfosRetMessage();
     }
 
-    private class RedisHealthCheckInstanceModel {
-
-        private String info;
-
-        private List<HealthCheckActionModel> actions;
-
-        public RedisHealthCheckInstanceModel(String info) {
-            this.info = info;
-            this.actions = Lists.newArrayList();
-        }
-
-        public void addAction(HealthCheckActionModel action) {
-            this.actions.add(action);
-        }
-
-        public List<HealthCheckActionModel> getActions() {
-            return actions;
-        }
-
-        public String getInfo() {
-            return info;
-        }
+    @RequestMapping(value = "/redis/info/global", produces = "application/json;charset=UTF-8", method = RequestMethod.GET)
+    public Map<HostPort, ActionContextRetMessage<Map<String, String>>> getGlobalAllRedisInfo() {
+        return infoService.getGlobalAllInfosRetMessage();
     }
 
-    private class HealthCheckActionModel {
-        private String name;
-        private List<String> listeners;
+    @RequestMapping(value = "/redis/inner/delay/{redisIp}/{redisPort}", method = RequestMethod.GET)
+    public Long getInnerReplDelayMillis(@PathVariable String redisIp, @PathVariable int redisPort) {
+        return delayService.getLocalCachedDelay(new HostPort(redisIp, redisPort));
+    }
 
-        public HealthCheckActionModel(String name) {
-            this.name = name;
-            this.listeners = Lists.newArrayList();
-        }
+    @RequestMapping(value = "/redis/inner/delay/all", method = RequestMethod.GET)
+    public Map<HostPort, Long> getAllInnerReplDelayMills() {
+        return delayService.getDcCachedDelay(FoundationService.DEFAULT.getDataCenter());
+    }
 
-        public void addListener(String listener) {
-            listeners.add(listener);
-        }
+    @RequestMapping(value = "/redis/inner/unhealthy", method = RequestMethod.GET)
+    public UnhealthyInfoModel getActiveClusterUnhealthyRedis() {
+        return delayService.getDcActiveClusterUnhealthyInstance(FoundationService.DEFAULT.getDataCenter());
+    }
 
-        public String getName() {
-            return name;
-        }
+    @RequestMapping(value = "/redis/inner/unhealthy/all", method = RequestMethod.GET)
+    public UnhealthyInfoModel getAllUnhealthyRedis() {
+        return delayService.getAllUnhealthyInstance();
+    }
 
-        public List<String> getListeners() {
-            return listeners;
-        }
+    @RequestMapping(value = "/cross-master/delay/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.GET)
+    public Map<String, Pair<HostPort, Long>> getCrossMasterDelay(@PathVariable String dcId, @PathVariable String clusterId, @PathVariable String shardId) {
+        return crossMasterDelayService.getPeerMasterDelayFromSourceDc(dcId, clusterId, shardId);
+    }
+
+    @RequestMapping(value = "/cross-master/inner/delay/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.GET)
+    public Map<String, Pair<HostPort, Long>> getInnerCrossMasterDelay(@PathVariable String clusterId, @PathVariable String shardId) {
+        return crossMasterDelayService.getPeerMasterDelayFromCurrentDc(clusterId, shardId);
     }
 }

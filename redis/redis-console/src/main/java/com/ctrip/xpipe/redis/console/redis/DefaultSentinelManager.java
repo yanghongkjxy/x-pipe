@@ -1,12 +1,16 @@
 package com.ctrip.xpipe.redis.console.redis;
 
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
+import com.ctrip.xpipe.cluster.ClusterType;
+import com.ctrip.xpipe.command.CommandTimeoutException;
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
 import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.exception.ExceptionUtils;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.pool.XpipeNettyClientKeyedObjectPool;
+import com.ctrip.xpipe.redis.checker.SentinelManager;
+import com.ctrip.xpipe.redis.console.notifier.ShardEventHandler;
 import com.ctrip.xpipe.redis.console.notifier.shard.ShardEvent;
-import com.ctrip.xpipe.redis.console.spring.ConsoleContextConfig;
 import com.ctrip.xpipe.redis.core.protocal.cmd.AbstractRedisCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.AbstractSentinelCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.InfoCommand;
@@ -25,7 +29,8 @@ import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
-import static com.ctrip.xpipe.redis.console.spring.ConsoleContextConfig.KEYED_NETTY_CLIENT_POOL;
+import static com.ctrip.xpipe.redis.checker.resource.Resource.KEYED_NETTY_CLIENT_POOL;
+import static com.ctrip.xpipe.redis.checker.resource.Resource.REDIS_COMMAND_EXECUTOR;
 
 /**
  * @author chen.zhu
@@ -35,7 +40,7 @@ import static com.ctrip.xpipe.redis.console.spring.ConsoleContextConfig.KEYED_NE
 
 @Component
 @Lazy
-public class DefaultSentinelManager implements SentinelManager {
+public class DefaultSentinelManager implements SentinelManager, ShardEventHandler {
 
     private Logger logger = LoggerFactory.getLogger(getClass());
 
@@ -44,11 +49,18 @@ public class DefaultSentinelManager implements SentinelManager {
     @Resource(name = KEYED_NETTY_CLIENT_POOL)
     private XpipeNettyClientKeyedObjectPool keyedClientPool;
 
-    @Resource(name = ConsoleContextConfig.REDIS_COMMAND_EXECUTOR)
+    @Resource(name = REDIS_COMMAND_EXECUTOR)
     private ScheduledExecutorService scheduled;
 
     @Override
-    public void removeShardSentinelMonitors(ShardEvent shardEvent) {
+    public void handleShardDelete(ShardEvent shardEvent) {
+        // remove shard sentinel monitors
+
+        ClusterType clusterType = shardEvent.getClusterType();
+        if (null != clusterType && clusterType.supportMultiActiveDC()) {
+            // not support remove sentinel for multi active dc cluster temporarily
+            return;
+        }
 
         String clusterId = shardEvent.getClusterName(), shardId = shardEvent.getShardName();
 
@@ -66,11 +78,11 @@ public class DefaultSentinelManager implements SentinelManager {
         List<InetSocketAddress> sentinels = IpUtils.parse(allSentinels);
         List<Sentinel> realSentinels = getRealSentinels(sentinels, sentinelMonitorName);
         if(realSentinels == null) {
-            logger.warn("[removeShardSentinelMonitors]findRedisHealthCheckInstance real sentinels null");
+            logger.warn("[removeShardSentinelMonitors]real sentinels null");
             return;
         }
 
-        logger.info("[removeShardSentinelMonitors]removeSentinelMonitor realSentinels: {}", realSentinels);
+        logger.info("[removeShardSentinelMonitors]realSentinels: {}", realSentinels);
 
         for(Sentinel sentinel : realSentinels) {
 
@@ -89,9 +101,9 @@ public class DefaultSentinelManager implements SentinelManager {
         HostPort result = null;
         try {
             result = sentinelMaster.execute().get();
-            logger.info("[getMasterOfMonitor]getMasterOfMonitor {} from {} : {}", sentinelMonitorName, sentinel, result);
+            logger.info("[getMasterOfMonitor] sentinel master {} from {} : {}", sentinelMonitorName, sentinel, result);
         } catch (Exception e) {
-            logger.error("[getMasterOfMonitor] {} from {} : {}", sentinelMonitorName, sentinel, e.getMessage());
+            logger.error("[getMasterOfMonitor] sentinel master {} from {} : {}", sentinelMonitorName, sentinel, e.getMessage());
         }
         return result;
     }
@@ -106,10 +118,10 @@ public class DefaultSentinelManager implements SentinelManager {
         silentCommand(sentinelRemove);
         try {
             String result = sentinelRemove.execute().get();
-            logger.info("[removeSentinels]removeSentinelMonitor {} from {} : {}", sentinelMonitorName, sentinel, result);
+            logger.info("[removeSentinels] sentinel remove {} from {} : {}", sentinelMonitorName, sentinel, result);
 
         } catch (Exception e) {
-            logger.error("removeSentinelMonitor {} from {} : {}", sentinelMonitorName, sentinel, e.getMessage());
+            logger.error("[removeSentinels] sentinel remove {} from {} : {}", sentinelMonitorName, sentinel, e.getMessage());
         }
     }
 
@@ -137,9 +149,14 @@ public class DefaultSentinelManager implements SentinelManager {
             AbstractSentinelCommand.SentinelMonitor command = new AbstractSentinelCommand.SentinelMonitor(clientPool,
                     scheduled, sentinelMonitorName, master, quorum);
             silentCommand(command);
-            command.execute().get();
+            String result=command.execute().get();
+            logger.info("[monitor] sentinel monitor {} for {} : {}", sentinelMonitorName, sentinel, result);
         } catch (Exception e) {
-            logger.error("[slaves] sentinel: {}", sentinel, e);
+            if (ExceptionUtils.getRootCause(e) instanceof CommandTimeoutException) {
+                logger.error("[monitor] sentinel monitor {} for {} : {}", sentinelMonitorName, sentinel, e.getMessage());
+            } else {
+                logger.error("[monitor] sentinel monitor {} for {}", sentinelMonitorName, sentinel, e);
+            }
         }
     }
 
@@ -154,7 +171,11 @@ public class DefaultSentinelManager implements SentinelManager {
             silentCommand(command);
             return command.execute().get();
         } catch (Exception e) {
-            logger.error("[slaves] sentinel: {}", sentinel, e);
+            if (ExceptionUtils.getRootCause(e) instanceof CommandTimeoutException) {
+                logger.error("[slaves] sentinel slaves {} from {} : {}", sentinelMonitorName, sentinel, e.getMessage());
+            } else {
+                logger.error("[slaves] sentinel slaves {} from {} : {}", sentinelMonitorName, sentinel, e);
+            }
         }
         return Lists.newArrayList();
     }
@@ -165,8 +186,13 @@ public class DefaultSentinelManager implements SentinelManager {
                 .getKeyPool(new DefaultEndPoint(sentinel.getIp(), sentinel.getPort()));
         try {
             new AbstractSentinelCommand.SentinelReset(clientPool, sentinelMonitorName, scheduled).execute().get();
+            logger.info("[reset] sentinel reset {} for {}", sentinelMonitorName, sentinel);
         } catch (Exception e) {
-            logger.error("[slaves] sentinel: {}", sentinel, e);
+            if (ExceptionUtils.getRootCause(e) instanceof CommandTimeoutException) {
+                logger.error("[reset] sentinel reset {} for {} : {}", sentinelMonitorName, sentinel, e.getMessage());
+            } else {
+                logger.error("[reset] sentinel reset {} for {} : {}", sentinelMonitorName, sentinel, e);
+            }
         }
     }
 
@@ -197,19 +223,19 @@ public class DefaultSentinelManager implements SentinelManager {
             silentCommand(sentinelsCommand);
             try {
                 realSentinels = sentinelsCommand.execute().get();
-                logger.info("[getRealSentinels]findRedisHealthCheckInstance sentinels from {} : {}", sentinelAddress, realSentinels);
-                if(realSentinels.size() > 0){
+                logger.info("[getRealSentinels]sentinel sentinels from {} : {}", sentinelAddress, realSentinels);
+                if(null != realSentinels){
                     realSentinels.add(
                             new Sentinel(sentinelAddress.toString(),
                                     sentinelAddress.getHostString(),
                                     sentinelAddress.getPort()
                             ));
-                    logger.info("[getRealSentinels]sentinels for monitor {}, list as: {}",
+                    logger.info("[getRealSentinels]sentinel sentinels {} : {}",
                             sentinelMonitorName, realSentinels);
                     break;
                 }
             } catch (Exception e) {
-                logger.warn("[getRealSentinels]findRedisHealthCheckInstance sentinels from " + sentinelAddress, e);
+                logger.warn("[getRealSentinels]sentinel sentinels {} from {}", sentinelMonitorName, sentinelAddress, e);
             }
         }
 

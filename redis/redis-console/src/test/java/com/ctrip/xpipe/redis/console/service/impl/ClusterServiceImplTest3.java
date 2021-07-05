@@ -2,7 +2,10 @@ package com.ctrip.xpipe.redis.console.service.impl;
 
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
+import com.ctrip.xpipe.redis.console.model.DcClusterShardTbl;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
+import com.ctrip.xpipe.redis.console.service.DcClusterShardService;
+import com.google.common.collect.Sets;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -11,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 
 public class ClusterServiceImplTest3 extends AbstractConsoleIntegrationTest{
@@ -19,10 +23,12 @@ public class ClusterServiceImplTest3 extends AbstractConsoleIntegrationTest{
     @Autowired
     private ClusterService clusterService;
 
+    @Autowired
+    private DcClusterShardService dcClusterShardService;
+
     @Before
     public void beforeStart(){
         MockitoAnnotations.initMocks(this);
-
     }
 
     @Override
@@ -52,6 +58,25 @@ public class ClusterServiceImplTest3 extends AbstractConsoleIntegrationTest{
             }
         });
 
+    }
+
+    @Test
+    public void testBindDC() {
+        clusterService.bindDc("cluster7", "jq");
+        DcClusterShardTbl dcClusterShardTbl = dcClusterShardService.find("jq", "cluster7", "shard1");
+
+        Assert.assertNotNull(dcClusterShardTbl);
+        Assert.assertEquals(1, dcClusterShardTbl.getSetinelId());
+
+    }
+
+    @Test
+    public void testDivideClusters() {
+        List<Set<String>> clusterParts = clusterService.divideClusters(3);
+        Assert.assertEquals(3, clusterParts.size());
+        Assert.assertEquals(Sets.newHashSet("cluster3"), clusterParts.get(0));
+        Assert.assertEquals(Sets.newHashSet("cluster1", "cluster4", "cluster7"), clusterParts.get(1));
+        Assert.assertEquals(Sets.newHashSet("cluster5"), clusterParts.get(2));
     }
 
 }

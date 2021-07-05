@@ -3,34 +3,39 @@ package com.ctrip.xpipe.redis.console.migration.status.migration;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationShard;
-import com.ctrip.xpipe.redis.console.migration.model.ShardMigrationResult;
 import com.ctrip.xpipe.redis.console.migration.model.ShardMigrationStep;
 import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
-import com.ctrip.xpipe.redis.console.migration.status.PartialSuccessState;
+import com.ctrip.xpipe.redis.console.migration.status.ForceProcessAbleState;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * @author shyin
  *         <p>
  *         Dec 8, 2016
  */
-public class MigrationPartialSuccessState extends AbstractMigrationMigratingState implements PartialSuccessState{
+public class MigrationPartialSuccessState extends AbstractMigrationMigratingState implements ForceProcessAbleState {
 
     public MigrationPartialSuccessState(MigrationCluster holder) {
         super(holder, MigrationStatus.PartialSuccess);
         this.setNextAfterSuccess(new MigrationPublishState(holder))
-                .setNextAfterFail(this);
+                .setNextAfterFail(new MigrationPartialRetryFailState(holder));
     }
 
     @Override
     public void doAction() {
+        String clusterName = getHolder().clusterName();
+        List<MigrationShard> failedShards = getHolder().getMigrationShards().stream().filter(shard ->
+                !shard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC)
+        ).collect(Collectors.toList());
 
-        for (final MigrationShard shard : getHolder().getMigrationShards()) {
-
-            ShardMigrationResult shardMigrationResult = shard.getShardMigrationResult();
-            if (!shardMigrationResult.stepSuccess(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC)) {
-                shardMigrationResult.stepRetry(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC);
-
-                String clusterName = getHolder().clusterName();
+        if (failedShards.isEmpty()) {
+            logger.info("[doAction][{}] no failed shards and refresh", clusterName);
+            refresh();
+        } else {
+            failedShards.forEach(shard -> shard.getShardMigrationResult().stepRetry(ShardMigrationStep.MIGRATE_NEW_PRIMARY_DC));
+            failedShards.forEach(shard -> {
                 String shardName = shard.shardName();
                 logger.info("[doAction][execute]{}, {}", clusterName, shardName);
                 executors.execute(new AbstractExceptionLogTask() {
@@ -42,7 +47,7 @@ public class MigrationPartialSuccessState extends AbstractMigrationMigratingStat
                         logger.info("[doMigrate][done]{},{}", clusterName, shardName);
                     }
                 });
-            }
+            });
         }
     }
 
@@ -53,7 +58,7 @@ public class MigrationPartialSuccessState extends AbstractMigrationMigratingStat
     }
 
     @Override
-    public void forcePublish() {
+    public void updateAndForceProcess() {
         updateAndForceProcess(new MigrationForcePublishState(getHolder()));
     }
 }

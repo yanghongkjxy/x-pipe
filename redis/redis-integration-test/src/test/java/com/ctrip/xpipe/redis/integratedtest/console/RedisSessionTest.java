@@ -6,16 +6,15 @@ import com.ctrip.xpipe.endpoint.DefaultEndPoint;
 import com.ctrip.xpipe.lifecycle.LifecycleHelper;
 import com.ctrip.xpipe.pool.XpipeNettyClientKeyedObjectPool;
 import com.ctrip.xpipe.proxy.ProxyEnabledEndpoint;
-import com.ctrip.xpipe.redis.console.healthcheck.session.Callbackable;
-import com.ctrip.xpipe.redis.console.healthcheck.session.PingCallback;
-import com.ctrip.xpipe.redis.console.healthcheck.session.RedisSession;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.Callbackable;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.PingCallback;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.RedisSession;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.core.protocal.cmd.pubsub.PublishCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.pubsub.SubscribeCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.pubsub.SubscribeListener;
 import com.ctrip.xpipe.redis.core.proxy.parser.DefaultProxyConnectProtocolParser;
 import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
-import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpointManager;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.NaiveNextHopAlgorithm;
 import com.ctrip.xpipe.redis.core.proxy.netty.ProxyEnabledNettyKeyedPoolClientFactory;
 import com.ctrip.xpipe.redis.core.proxy.resource.ConsoleProxyResourceManager;
@@ -70,7 +69,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         PublishCommand publishCommand = new PublishCommand(getXpipeNettyClientKeyedObjectPool().getKeyPool(endpoint),
                 scheduled, SUBSCRIBE_CHANNEL, message);
         publishCommand.execute();
-        waitConditionUntilTimeOut(()->result.get() != null, 1000);
+        waitConditionUntilTimeOut(()->result.get() != null, 5000);
         logger.info("[message] result: {}", result.get());
         Assert.assertEquals(message, result.get());
     }
@@ -105,7 +104,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         });
         Thread.sleep(1000);
         redisSession.publish(SUBSCRIBE_CHANNEL, message);
-        Thread.sleep(1000);
+        waitConditionUntilTimeOut(()->result.get()!=null, 2000);
         Assert.assertNotNull(result.get());
         Assert.assertEquals(message, result.get());
     }
@@ -164,10 +163,10 @@ public class RedisSessionTest extends AbstractIntegratedTest {
 
     @Test
     public void testInfo() throws InterruptedException {
-        redisSession.info("server", new Callbackable<String>() {
+        redisSession.info("replication", new Callbackable<String>() {
             @Override
             public void success(String message) {
-                logger.info("[info] message: ", message);
+                logger.info("[info] message: {}", message);
             }
 
             @Override
@@ -226,8 +225,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
     }
 
 
-    private ProxyResourceManager resourceManager = new ConsoleProxyResourceManager(
-            new DefaultProxyEndpointManager(()->1), new NaiveNextHopAlgorithm());
+    private ProxyResourceManager resourceManager = new ConsoleProxyResourceManager(new NaiveNextHopAlgorithm());
 
     @Test
     public void testPingThroughProxy() throws Exception {
