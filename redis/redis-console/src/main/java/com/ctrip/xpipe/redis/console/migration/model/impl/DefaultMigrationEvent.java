@@ -5,6 +5,7 @@ import com.ctrip.xpipe.api.observer.Observer;
 import com.ctrip.xpipe.observer.AbstractObservable;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
+import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
 import com.ctrip.xpipe.redis.console.model.MigrationEventTbl;
 import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterNotFoundException;
 import com.google.common.collect.Lists;
@@ -33,14 +34,13 @@ public class DefaultMigrationEvent extends AbstractObservable implements Migrati
 
     @Override
     public void process() {
-
-        List<MigrationCluster> migrationClusters = getMigrationClusters();
-        if (migrationClusters.size() == 0) {
-            logger.info("[process][no cluster]{}", migrationClusters);
+        List<MigrationCluster> localMigrationClusters = getMigrationClusters();
+        if (localMigrationClusters.isEmpty()) {
+            logger.info("[process][{}][no cluster]{}", event.getId(), localMigrationClusters);
             return;
         }
 
-        MigrationCluster migrationCluster = migrationClusters.get(0);
+        MigrationCluster migrationCluster = localMigrationClusters.get(0);
         migrationCluster.process();
     }
 
@@ -67,7 +67,6 @@ public class DefaultMigrationEvent extends AbstractObservable implements Migrati
 
     @Override
     public MigrationCluster rollbackCluster(long clusterId) throws ClusterNotFoundException {
-
         MigrationCluster migrationCluster = getMigrationCluster(clusterId);
         if(migrationCluster == null){
             throw new ClusterNotFoundException(clusterId);
@@ -77,11 +76,10 @@ public class DefaultMigrationEvent extends AbstractObservable implements Migrati
         return migrationCluster;
     }
 
-    @Override
+        @Override
     public MigrationCluster rollbackCluster(String clusterName) throws ClusterNotFoundException {
-
         MigrationCluster cluster = getMigrationCluster(clusterName);
-        if(cluster == null){
+        if(cluster == null) {
             throw new ClusterNotFoundException(clusterName);
         }
         cluster.rollback();
@@ -103,7 +101,8 @@ public class DefaultMigrationEvent extends AbstractObservable implements Migrati
     @Override
     public void update(Object args, Observable observable) {
         if (args instanceof MigrationCluster) {
-            if (((MigrationCluster) args).getStatus().isTerminated()) {
+            MigrationStatus status = ((MigrationCluster) args).getStatus();
+            if (status.isTerminated() && MigrationStatus.TYPE_SUCCESS.equals(status.getType())) {
                 // Submit next task according to policy
                 processNext();
             }
@@ -128,7 +127,6 @@ public class DefaultMigrationEvent extends AbstractObservable implements Migrati
         }
     }
 
-
     @Override
     public boolean isDone() {
 
@@ -141,7 +139,7 @@ public class DefaultMigrationEvent extends AbstractObservable implements Migrati
         }
 
         if (successCnt == migrationClusters.size()) {
-            logger.info("[isDone][true]{}, success:{}", getMigrationEventId(), successCnt);
+            logger.debug("[isDone][true]{}, success:{}", getMigrationEventId(), successCnt);
             return true;
         }
         return false;

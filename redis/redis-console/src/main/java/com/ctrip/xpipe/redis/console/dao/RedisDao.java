@@ -62,6 +62,25 @@ public class RedisDao extends AbstractXpipeConsoleDAO {
         });
     }
 
+    public List<RedisTbl> findAllByDcClusterShard(final long dcClusterShardId, String redisRole) {
+
+        return queryHandler.handleQuery(new DalQuery<List<RedisTbl>>() {
+
+            @Override
+            public List<RedisTbl> doQuery() throws DalException {
+                return redisTblDao.findAllByDcClusterShardId(dcClusterShardId, redisRole, RedisTblEntity.READSET_FULL);
+            }
+        });
+    }
+
+    public List<RedisTbl> findAllByDcCluster(long dcId, String clusterName, String redisRole) {
+        return queryHandler.handleQuery(new DalQuery<List<RedisTbl>>() {
+            @Override
+            public List<RedisTbl> doQuery() throws DalException {
+                return redisTblDao.findAllByDcCluster(dcId, clusterName, redisRole, RedisTblEntity.READSET_FULL);
+            }
+        });
+    }
     @DalTransaction
     public int[] createRedisesBatch(List<RedisTbl> redises) {
         if (null != redises) {

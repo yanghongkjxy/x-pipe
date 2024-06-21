@@ -48,6 +48,7 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
 
     private static GenericObjectPoolConfig createDefaultConfig(int maxPerKey) {
         GenericObjectPoolConfig config = new GenericObjectPoolConfig();
+        config.setJmxEnabled(false);
         config.setMaxTotal(maxPerKey);
         config.setBlockWhenExhausted(false);
         return config;
@@ -63,6 +64,11 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
         this.pooledObjectFactory = pooledObjectFactory;
     }
 
+    public XpipeNettyClientKeyedObjectPool(int maxPerKey, NettyKeyedPoolClientFactory pooledObjectFactory) {
+        this(maxPerKey);
+        this.pooledObjectFactory = pooledObjectFactory;
+    }
+
     @Override
     protected void doInitialize() throws Exception {
 
@@ -73,6 +79,7 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
 
         config.setTestOnBorrow(true);
         config.setTestOnReturn(false);
+        config.setJmxEnabled(false);
         config.setSoftMinEvictableIdleTimeMillis(DEFAULT_SOFT_MIN_EVICTABLE_IDLE_TIME_MILLIS);
         config.setMinEvictableIdleTimeMillis(DEFAULT_MIN_EVICTABLE_IDLE_TIME_MILLIS);
         config.setTimeBetweenEvictionRunsMillis(DEFAULT_TIME_BETWEEN_EVICTION_RUNS_MILLIS);
@@ -142,12 +149,13 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
 
     @Override
     public void clear(Endpoint key) throws ObjectPoolException {
-        if(!objectPools.containsKey(key)) {
+        XpipeNettyClientPool pool = objectPools.remove(key);
+        if(pool == null) {
             logger.warn("[clear] clear an non-existing object pool");
             return;
         }
         try {
-            getOrCreate(key).clear();
+            pool.clear();
         } catch (Exception e) {
             throw new ObjectPoolException("object pool:" + getOrCreate(key) + ",key:" + key, e);
         }
@@ -177,6 +185,11 @@ public class XpipeNettyClientKeyedObjectPool extends AbstractLifecycle
     @VisibleForTesting
     public ObjectPool getObjectPool(Endpoint endpoint) {
         return getOrCreate(endpoint).getObjectPool();
+    }
+
+    @VisibleForTesting
+    protected XpipeNettyClientPool getClientPool(Endpoint endpoint) {
+        return objectPools.get(endpoint);
     }
 
 }

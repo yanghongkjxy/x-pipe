@@ -3,7 +3,6 @@ package com.ctrip.xpipe.redis.integratedtest.full;
 import com.ctrip.xpipe.api.cluster.LeaderElectorManager;
 import com.ctrip.xpipe.foundation.DefaultFoundationService;
 import com.ctrip.xpipe.redis.core.entity.*;
-import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
 import com.ctrip.xpipe.redis.integratedtest.AbstractIntegratedTest;
 import com.ctrip.xpipe.redis.integratedtest.ConsoleStart;
 import com.ctrip.xpipe.redis.integratedtest.DcInfo;
@@ -11,7 +10,6 @@ import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.meta.server.TestMetaServer;
 import com.ctrip.xpipe.utils.IpUtils;
 import org.apache.commons.exec.ExecuteException;
-import org.jboss.netty.util.internal.ConcurrentHashMap;
 import org.junit.After;
 import org.junit.Before;
 
@@ -21,6 +19,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author wenchao.meng
@@ -145,9 +144,7 @@ public abstract class AbstractFullIntegrated extends AbstractIntegratedTest{
 		
 		startMetaServers(dcMeta);
 
-		
-		MetaServerKeeperService metaService = createMetaService(dcMeta.getMetaServers());
-		
+
 		LeaderElectorManager leaderElectorManager = createLeaderElectorManager(dcMeta);
 
 		logger.info("[startDc]{}\n\n", dc);
@@ -157,7 +154,7 @@ public abstract class AbstractFullIntegrated extends AbstractIntegratedTest{
 			for (ShardMeta shardMeta : clusterMeta.getShards().values()) {
 				logger.info(remarkableMessage("[startShard]{}"), shardMeta.getId());
 				for (KeeperMeta keeperMeta : shardMeta.getKeepers()) {
-					startKeeper(keeperMeta, metaService, leaderElectorManager);
+					startKeeper(keeperMeta, leaderElectorManager);
 				}
 				for (RedisMeta redisMeta : shardMeta.getRedises()) {
 					startRedis(redisMeta);
@@ -208,7 +205,7 @@ public abstract class AbstractFullIntegrated extends AbstractIntegratedTest{
 		List<RedisKeeperServer> result = new LinkedList<>();
 		Map<String, RedisKeeperServer> redisKeeperServers = getRegistry().getComponents(RedisKeeperServer.class);
 		for(RedisKeeperServer redisKeeperServer : redisKeeperServers.values()){
-			String currentDc = redisKeeperServer.getCurrentKeeperMeta().parent().parent().parent().getId();
+			String currentDc = ((ClusterMeta) redisKeeperServer.getCurrentKeeperMeta().parent().parent()).parent().getId();
 			if(dc.equals(currentDc)){
 				result.add(redisKeeperServer);
 			}

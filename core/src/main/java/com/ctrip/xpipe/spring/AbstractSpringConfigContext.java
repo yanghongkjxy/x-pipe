@@ -5,9 +5,13 @@ import com.ctrip.xpipe.exception.DefaultExceptionHandler;
 import com.ctrip.xpipe.utils.OsUtils;
 import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import com.google.common.util.concurrent.MoreExecutors;
+import org.apache.catalina.startup.Tomcat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
+import org.springframework.boot.web.embedded.tomcat.TomcatWebServer;
+import org.springframework.boot.web.server.WebServer;
+import org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
@@ -25,7 +29,7 @@ import java.util.concurrent.*;
 @ComponentScan("com.ctrip.xpipe.monitor")
 public abstract class AbstractSpringConfigContext implements ApplicationContextAware{
 	
-	protected Logger logger = LoggerFactory.getLogger(getClass());
+	protected static Logger logger = LoggerFactory.getLogger(AbstractSpringConfigContext.class);
 	
 	public static ApplicationContext applicationContext;
 	
@@ -35,6 +39,9 @@ public abstract class AbstractSpringConfigContext implements ApplicationContextA
 
 	public static final String SCHEDULED_EXECUTOR = "scheduledExecutor";
 	public static final String GLOBAL_EXECUTOR = "globalExecutor";
+	public static final String CLUSTER_SHARD_ADJUST_EXECUTOR = "clusterShardAdjustExecutor";
+	public static final String PEER_MASTER_CHOOSE_EXECUTOR = "peerMasterChooseExecutor";
+	public static final String PEER_MASTER_ADJUST_EXECUTOR = "peerMasterAdjustExecutor";
 	public static final int maxScheduledCorePoolSize = 8;
 	public static final int THREAD_POOL_TIME_OUT = 5;
 	public static final int GLOBAL_THREAD_MULTI_CORE = 100;
@@ -85,6 +92,30 @@ public abstract class AbstractSpringConfigContext implements ApplicationContextA
 	
 	public static ApplicationContext getApplicationContext() {
 		return applicationContext;
+	}
+
+	public static Executor tryGetTomcatHttpExecutor() {
+		if (!(applicationContext instanceof ServletWebServerApplicationContext))  {
+			logger.info("[tryGetTomcatHttpExecutor][unexpected context] {}", null != applicationContext ?
+					applicationContext.getClass().getName() : null);
+			return null;
+		}
+
+		ServletWebServerApplicationContext webApplicationContext = (ServletWebServerApplicationContext) applicationContext;
+		WebServer webServer = webApplicationContext.getWebServer();
+		if (!(webServer instanceof TomcatWebServer)) {
+			logger.info("[tryGetTomcatHttpExecutor][unexpected server] {}", null != webServer ?
+					webServer.getClass().getName() : null);
+			return null;
+		}
+
+		Tomcat tomcat = ((TomcatWebServer) webServer).getTomcat();
+		if (0 == tomcat.getService().findConnectors().length) {
+			logger.info("[tryGetTomcatHttpExecutor][connector not inited]");
+			return null;
+		}
+
+		return tomcat.getConnector().getProtocolHandler().getExecutor();
 	}
 
 }

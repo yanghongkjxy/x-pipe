@@ -1,11 +1,14 @@
 package com.ctrip.xpipe.redis.console.service.impl;
 
+import com.ctrip.xpipe.cluster.ClusterType;
+import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
 import com.ctrip.xpipe.redis.console.constant.XPipeConsoleConstant;
 import com.ctrip.xpipe.redis.console.dao.RedisDao;
 import com.ctrip.xpipe.redis.console.exception.BadRequestException;
 import com.ctrip.xpipe.redis.console.exception.ServerException;
 import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.notifier.ClusterMetaModifiedNotifier;
+import com.ctrip.xpipe.redis.console.notifier.ClusterMonitorModifiedNotifier;
 import com.ctrip.xpipe.redis.console.query.DalQuery;
 import com.ctrip.xpipe.redis.console.service.*;
 import com.ctrip.xpipe.redis.console.service.exception.ResourceNotFoundException;
@@ -18,25 +21,30 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.unidal.dal.jdbc.DalException;
 
-import java.util.Comparator;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 
 @Service
 public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implements RedisService {
 
     @Autowired
-    private RedisDao redisDao;
+    protected RedisDao redisDao;
     @Autowired
-    private ClusterService clusterService;
+    protected ClusterService clusterService;
     @Autowired
-    private DcClusterShardService dcClusterShardService;
+    protected DcClusterShardService dcClusterShardService;
     @Autowired
-    private KeepercontainerService keepercontainerService;
+    protected KeeperContainerService keeperContainerService;
     @Autowired
-    private ClusterMetaModifiedNotifier notifier;
+    protected ClusterMetaModifiedNotifier notifier;
+    @Autowired
+    protected ClusterMonitorModifiedNotifier monitorNotifier;
+    @Autowired
+    protected DcService dcService;
+    @Autowired
+    protected ConsoleConfig consoleConfig;
 
     private Comparator<RedisTbl> redisComparator = new Comparator<RedisTbl>() {
         @Override
@@ -55,6 +63,16 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
             @Override
             public RedisTbl doQuery() throws DalException {
                 return dao.findByPK(id, RedisTblEntity.READSET_FULL);
+            }
+        });
+    }
+
+    @Override
+    public RedisTbl findByIpPort(String ip, int port) {
+        return queryHandler.handleQuery(new DalQuery<RedisTbl>() {
+            @Override
+            public RedisTbl doQuery() throws DalException {
+                return dao.findByIpPort(ip, port, RedisTblEntity.READSET_FULL);
             }
         });
     }
@@ -86,6 +104,17 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
             @Override
             public List<RedisTbl> doQuery() throws DalException {
                 return dao.findAllByDcClusterName(dcId, clusterId, XPipeConsoleConstant.ROLE_REDIS, RedisTblEntity.READSET_FULL);
+            }
+        });
+    }
+
+    @Override
+    public List<RedisTbl> findAllKeepersByDcClusterName(String dcId, String clusterId) {
+
+        return queryHandler.handleQuery(new DalQuery<List<RedisTbl>>() {
+            @Override
+            public List<RedisTbl> doQuery() throws DalException {
+                return dao.findAllByDcClusterName(dcId, clusterId, XPipeConsoleConstant.ROLE_KEEPER, RedisTblEntity.READSET_FULL);
             }
         });
     }
@@ -141,7 +170,7 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
 
         doInsertInstances(XPipeConsoleConstant.ROLE_REDIS, dcId, clusterId, shardId, redisAddresses);
 
-        notifier.notifyClusterUpdate(dcId, clusterId);
+        notifyClusterUpdate(dcId, clusterId);
     }
 
     @Override
@@ -149,7 +178,6 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
                                           List<KeeperBasicInfo> keepers) throws DalException, ResourceNotFoundException {
 
         logger.info("[insertKeepers]{}, {}, {}, {}", dcId, clusterId, shardId, keepers);
-
         DcClusterShardTbl dcClusterShardTbl = dcClusterShardService.find(dcId, clusterId, shardId);
         if (dcClusterShardTbl == null) {
             throw new ResourceNotFoundException(dcId, clusterId, shardId);
@@ -167,14 +195,17 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
         validateKeepers(insertKeepers);
 
         int[] insert = insert(insertKeepers);
-        notifier.notifyClusterUpdate(dcId, clusterId);
+        notifyClusterUpdate(dcId, clusterId);
         return MathUtil.sum(insert);
     }
 
     @Override
     public List<RedisTbl> deleteKeepers(String dcId, String clusterId, String shardId) throws DalException, ResourceNotFoundException {
-
-        List<RedisTbl> keepersByDcClusterShard = findKeepersByDcClusterShard(dcId, clusterId, shardId);
+        Map<Long, Long> keeperContainerIdDcMap = keeperContainerService.keeperContainerIdDcMap();
+        List<RedisTbl> keepersByDcClusterShard = findKeepersByDcClusterShard(dcId, clusterId, shardId)
+                .stream().filter(redisTbl -> ObjectUtils.equals(Long.valueOf(dcService.find(dcId).getId()),
+                        keeperContainerIdDcMap.get(Long.valueOf(redisTbl.getKeepercontainerId()))))
+                .collect(Collectors.toList());
 
         queryHandler.handleQuery(new DalQuery<int[]>() {
             @Override
@@ -215,14 +246,14 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
                 return null;
             }
         });
-        notifier.notifyClusterUpdate(dcId, clusterId);
+        notifyClusterUpdate(dcId, clusterId);
     }
 
     private RedisTbl createRedisTbl(Pair<String, Integer> addr, String role) {
         return dao.createLocal()
-                .setRedisIp(addr.getKey())
+                .setRedisIp(addr.getKey().trim())
                 .setRedisPort(addr.getValue())
-                .setRedisRole(role)
+                .setRedisRole(role.trim())
                 .setRunId("unknown");
     }
 
@@ -249,6 +280,37 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
         redisDao.updateBatchKeeperActive(redises);
     }
 
+    @Override
+    public void updateSourceKeepers(String srcDcName, String clusterName, String shardName, long dstDcId, ShardModel sourceShard) {
+        if (null == sourceShard) {
+            throw new BadRequestException("RequestBody cannot be null.");
+        }
+        final DcClusterShardTbl dcClusterShard = dcClusterShardService.find(srcDcName, clusterName, shardName);
+        if (null == dcClusterShard) {
+            throw new BadRequestException("Cannot find related dc-cluster-shard.");
+        }
+
+        List<RedisTbl> originKeepers = findAllSourceKeepers(dcClusterShard.getDcClusterShardId(), dstDcId);
+        List<RedisTbl> toUpdateKeepers = formatRedisesFromShardModel(dcClusterShard, sourceShard);
+
+        updateRedises(originKeepers, toUpdateKeepers);
+
+    }
+
+    private List<RedisTbl> findAllSourceKeepers(long dcClusterShardId, long dstDcId) {
+        List<RedisTbl> result = new ArrayList<>();
+        Map<Long, Long> keeperContainerIdDcMap = keeperContainerService.keeperContainerIdDcMap();
+        List<RedisTbl> allKeepers = findAllByDcClusterShard(dcClusterShardId);
+
+        if (allKeepers != null && !allKeepers.isEmpty()) {
+            allKeepers.forEach(keeper -> {
+                if (keeper.getRedisRole().equals(XPipeConsoleConstant.ROLE_KEEPER) &&
+                        ObjectUtils.equals(Long.valueOf(dstDcId), keeperContainerIdDcMap.get(Long.valueOf(keeper.getKeepercontainerId()))))
+                    result.add(keeper);
+            });
+        }
+        return result;
+    }
 
     @Override
     public void updateRedises(String dcName, String clusterName, String shardName, ShardModel shardModel) {
@@ -260,8 +322,12 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
         if (null == dcClusterShard) {
             throw new BadRequestException("Cannot find related dc-cluster-shard.");
         }
+        final DcTbl dcTbl = dcService.find(dcName);
+        if (null == dcTbl) {
+            throw new BadRequestException(String.format("dc %s does not exist", dcName));
+        }
 
-        List<RedisTbl> originRedises = findAllByDcClusterShard(dcClusterShard.getDcClusterShardId());
+        List<RedisTbl> originRedises = findAllShardRedisesAndKeepers(dcClusterShard.getDcClusterShardId(), dcTbl.getId());
         List<RedisTbl> toUpdateRedises = formatRedisesFromShardModel(dcClusterShard, shardModel);
 
         updateRedises(originRedises, toUpdateRedises);
@@ -274,7 +340,71 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
         }
 
         // Notify metaserver
-        notifier.notifyClusterUpdate(dcName, clusterName);
+        notifyClusterUpdate(dcName, clusterName);
+    }
+
+    private List<RedisTbl> findAllShardRedisesAndKeepers(long dcClusterShardId, long dcId) {
+        List<RedisTbl> result = new ArrayList<>();
+        List<RedisTbl> redises = findAllByDcClusterShard(dcClusterShardId);
+        if (redises == null) {
+            return result;
+        }
+        Map<Long, Long> keeperContainerIdDcMap = keeperContainerService.keeperContainerIdDcMap();
+
+        for (RedisTbl redis : redises) {
+            if(redis.getRedisRole().equals(XPipeConsoleConstant.ROLE_REDIS)) {
+                result.add(redis);
+            } else if (ObjectUtils.equals(Long.valueOf(dcId), keeperContainerIdDcMap.get(Long.valueOf(redis.getKeepercontainerId())))) {
+                result.add(redis);
+            }
+        }
+        return result;
+
+    }
+
+    @Override
+    public List<RedisTbl> findAllKeeperContainerCountInfo() {
+        return queryHandler.handleQuery(new DalQuery<List<RedisTbl>>() {
+            @Override
+            public List<RedisTbl> doQuery() throws DalException {
+                return dao.countContainerKeeperAndClusterAndShard(RedisTblEntity.READSET_CONTAINER_LOAD);
+            }
+        });
+    }
+
+    @Override
+    public List<Long> findClusterIdsByKeeperContainer(long keeperContainerId) {
+        List<RedisTbl> keepers = queryHandler.handleQuery(new DalQuery<List<RedisTbl>>() {
+            @Override
+            public List<RedisTbl> doQuery() throws DalException {
+                return dao.findDcClusterByKeeperContainer(keeperContainerId, RedisTblEntity.READSET_CLUSTER_ID);
+            }
+        });
+
+        Set<Long> clusterIdSet = new HashSet<>();
+        keepers.forEach(keeper -> clusterIdSet.add(keeper.getDcClusterInfo().getClusterId()));
+
+        return new ArrayList<>(clusterIdSet);
+    }
+
+    protected void notifyClusterUpdate(String dcName, String clusterName) {
+        ClusterTbl cluster = clusterService.find(clusterName);
+        if (null == cluster) throw new IllegalArgumentException("not exist cluster " + clusterName);
+
+        ClusterType type = ClusterType.lookup(cluster.getClusterType());
+        if (consoleConfig.shouldNotifyClusterTypes().contains(type.name())) {
+            if (type.supportMultiActiveDC()) {
+                List<DcTbl> dcTbls = dcService.findClusterRelatedDc(clusterName);
+                if (null != dcTbls) notifier.notifyClusterUpdate(clusterName,
+                        dcTbls.stream().map(DcTbl::getDcName).collect(Collectors.toList()));
+            } else {
+                notifier.notifyClusterUpdate(clusterName, Collections.singletonList(dcName));
+            }
+        }
+
+        if (type.supportMigration()) {
+            monitorNotifier.notifyClusterUpdate(clusterName, cluster.getClusterOrgId());
+        }
     }
 
     private void updateRedises(List<RedisTbl> origin, List<RedisTbl> target) {
@@ -355,14 +485,19 @@ public class RedisServiceImpl extends AbstractConsoleService<RedisTblDao> implem
         }
 
         List<RedisTbl> originalKeepers = RedisDao.findWithRole(findAllByDcClusterShard(keepers.get(0).getDcClusterShardId()), XPipeConsoleConstant.ROLE_KEEPER);
+        Set<Long> keepercontainerAvialableZones = new HashSet<>();
         for (int cnt = 0; cnt != 2; ++cnt) {
             final RedisTbl keeper = keepers.get(cnt);
-            KeepercontainerTbl keepercontainer = keepercontainerService.find(keeper.getKeepercontainerId());
+            KeepercontainerTbl keepercontainer = keeperContainerService.find(keeper.getKeepercontainerId());
             if (null == keepercontainer) {
                 throw new BadRequestException("Cannot find related keepercontainer");
             }
             if (!keeper.getRedisIp().equals(keepercontainer.getKeepercontainerIp())) {
                 throw new BadRequestException("Keeper's ip should be equal to keepercontainer's ip");
+            }
+            if(keepercontainer.getAzId() != 0 && !keepercontainerAvialableZones.add(keepercontainer.getAzId())) {
+                logger.error("Keepers {}:{} and {}:{} are in the same available zone {}", keepers.get(0).getRedisIp(), keepers.get(0).getRedisPort(),
+                        keepers.get(1).getRedisIp(), keepers.get(1).getRedisPort(), keepercontainer.getAzId());
             }
 
             // port check

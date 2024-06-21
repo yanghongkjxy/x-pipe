@@ -158,7 +158,12 @@ public abstract class AbstractMigrationState implements ActionMigrationState {
     }
 
     protected void updateAndForceProcess(MigrationState state) {
-        markDone();
+        try {
+            markDone();
+        } catch (Throwable th) {
+            logger.info("[updateAndForceProcess] ignore mark done fail", th);
+        }
+
         updateAndProcess(state, true, true);
     }
 
@@ -170,13 +175,20 @@ public abstract class AbstractMigrationState implements ActionMigrationState {
     protected void updateAndStop(MigrationState state) {
         markDone();
         updateAndProcess(state, false, false);
+        getHolder().update(getHolder(), getHolder()); // notify for migration paused
     }
 
     private void updateAndProcess(MigrationState stat, boolean process, boolean forceContinue) {
 
         if (forceContinue || hasContine.compareAndSet(false, true)) {
             logger.info("[updateAndProcess][continue]{}, {}, {}", getHolder().clusterName(), stat, process);
-            getHolder().updateStat(stat);
+            try {
+                getHolder().updateStat(stat);
+            } catch (Throwable th) {
+                logger.info("[updateAndProcess]{} update stat fail and stop", getHolder().clusterName(), th);
+                throw th;
+            }
+
             if (process) {
                 getHolder().process();
             }

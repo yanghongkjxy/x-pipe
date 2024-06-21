@@ -19,8 +19,16 @@ public class DateTimeUtils {
 		return FastDateFormat.getInstance(format).format(new Date());
 	}
 
+	public static String currentTimeAsString(String currentFormat) {
+		return FastDateFormat.getInstance(currentFormat).format(new Date());
+	}
+
 	public static String timeAsString(Date date) {
 		return FastDateFormat.getInstance(format).format(date);
+	}
+
+	public static String timeAsString(Date date, String currentFormat) {
+		return FastDateFormat.getInstance(currentFormat).format(date);
 	}
 
 	public static String timeAsString(long timeMilli) {
@@ -44,11 +52,26 @@ public class DateTimeUtils {
 		return cal.getTime();
 	}
 
+	public synchronized static Date getSecondsLaterThan(Date date, int second) {
+		Calendar cal = Calendar.getInstance();
+		cal.setTime(date);
+		cal.add(Calendar.SECOND, second);
+		return cal.getTime();
+	}
+
 	public static Date getHoursBeforeDate(Date date, int hours) {
 		int minusHours = -Math.abs(hours);
 		Calendar cal = Calendar.getInstance();
 		cal.setTime(date);
 		cal.add(Calendar.HOUR_OF_DAY, minusHours);
+		return cal.getTime();
+	}
+
+	public static Date getSecondBeforeDate(Date date, int second) {
+		int minusSecond = -Math.abs(second);
+		Calendar cal = Calendar.getInstance();
+		cal.setTime(date);
+		cal.add(Calendar.SECOND, minusSecond);
 		return cal.getTime();
 	}
 

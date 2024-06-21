@@ -2,14 +2,20 @@ package com.ctrip.xpipe.redis.core.protocal.cmd;
 
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.netty.commands.NettyClient;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser;
+import com.ctrip.xpipe.redis.core.protocal.PsyncObserver;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
+import com.ctrip.xpipe.redis.core.protocal.protocal.RdbBulkStringParser;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOp;
+import com.ctrip.xpipe.redis.core.redis.rdb.RdbParseListener;
+import com.ctrip.xpipe.redis.core.redis.rdb.RdbParser;
+import com.ctrip.xpipe.redis.core.redis.rdb.parser.AuxOnlyRdbParser;
 import com.ctrip.xpipe.redis.core.store.RdbStore;
 import com.ctrip.xpipe.redis.core.store.ReplicationStore;
 import com.ctrip.xpipe.tuple.Pair;
 import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -17,14 +23,14 @@ import java.util.concurrent.ScheduledExecutorService;
  *
  * 2016年3月24日 下午2:24:38
  */
-public abstract class AbstractReplicationStorePsync extends AbstractPsync {
+public abstract class AbstractReplicationStorePsync extends AbstractPsync implements RdbParseListener {
 	
 	protected volatile ReplicationStore  	    currentReplicationStore;
 
 	private volatile RdbStore rdbStore;
 	
 	private volatile InOutPayloadReplicationStore inOutPayloadReplicationStore;
-	
+
 	public AbstractReplicationStorePsync(SimpleObjectPool<NettyClient> clientPool, boolean saveCommands, ScheduledExecutorService scheduled) {
 		super(clientPool, saveCommands, scheduled);
 	}
@@ -35,7 +41,6 @@ public abstract class AbstractReplicationStorePsync extends AbstractPsync {
 		
 		String replIdRequest = null;
 		long offset = -1;
-		
 		if(currentReplicationStore == null){
 			replIdRequest = "?";
 			offset = -1;
@@ -43,12 +48,11 @@ public abstract class AbstractReplicationStorePsync extends AbstractPsync {
 			replIdRequest = currentReplicationStore.getMetaStore().getReplId();
 			offset = currentReplicationStore.getEndOffset() + 1;
 		}
-		return new Pair<String, Long>(replIdRequest, offset);
+		return new Pair<>(replIdRequest, offset);
 	}
 
-
 	protected abstract ReplicationStore getCurrentReplicationStore();
-	
+
 	@Override
 	protected void doOnFullSync() throws IOException {
 		
@@ -69,26 +73,44 @@ public abstract class AbstractReplicationStorePsync extends AbstractPsync {
 	}
 
 	@Override
-	protected BulkStringParser createRdbReader() {
-		
+	protected void doOnKeeperContinue(String replId, long beginOffset) throws IOException {
+		try {
+			if(currentReplicationStore == null || !currentReplicationStore.isFresh()){
+				throw new IllegalStateException("keeper-continue to non fresh repl store");
+			}
+			currentReplicationStore.continueFromOffset(replId, beginOffset);
+			super.doOnKeeperContinue(replId, beginOffset);
+		} catch (IOException e) {
+			getLogger().error("[doOnKeeperContinue]" + replId + ":" + beginOffset, e);
+		}
+	}
+
+	@Override
+	protected RdbBulkStringParser createRdbReader() {
+
 		inOutPayloadReplicationStore = new InOutPayloadReplicationStore();
-		BulkStringParser rdbReader = new BulkStringParser(inOutPayloadReplicationStore);
-		return rdbReader;
+		AuxOnlyRdbParser rdbParser = new AuxOnlyRdbParser();
+		rdbParser.registerListener(this);
+		return new RdbBulkStringParser(inOutPayloadReplicationStore, rdbParser);
 	}
 
 	@Override
 	protected void beginReadRdb(EofType eofType) {
 		try {
-			rdbStore = currentReplicationStore.beginRdb(replId, masterRdbOffset, eofType);
+			rdbStore = currentReplicationStore.prepareRdb(replId, masterRdbOffset, eofType);
 			inOutPayloadReplicationStore.setRdbStore(rdbStore);
 			super.beginReadRdb(eofType);
 		} catch (IOException e) {
-			logger.error("[beginReadRdb]" + replId + "," + masterRdbOffset, e);
+			getLogger().error("[beginReadRdb]" + replId + "," + masterRdbOffset, e);
 		}
 	}
 	
 	@Override
 	protected void failReadRdb(Throwable throwable) {
+		if (rdbStore == null) {
+			getLogger().info("[failRdb], rdbStore=null", throwable);
+			return;
+		}
 		rdbStore.failRdb(throwable);
 	}
 
@@ -98,4 +120,31 @@ public abstract class AbstractReplicationStorePsync extends AbstractPsync {
 	}
 
 	protected abstract void doWhenFullSyncToNonFreshReplicationStore(String masterRunid) throws IOException;
+
+	@Override
+	public void onRedisOp(RedisOp redisOp) {
+
+	}
+
+	@Override
+	public void onAux(String key, String value) {
+	}
+
+	@Override
+	public void onAuxFinish(Map<String, String> auxMap) {
+		getLogger().info("[onAuxFinish] aux is finish");
+
+		for (PsyncObserver observer : observers) {
+			try {
+				observer.readAuxEnd(rdbStore, auxMap);
+			} catch (Throwable th) {
+				getLogger().error("[onAuxFinish]" + this, th);
+			}
+		}
+	}
+
+	@Override
+	public void onFinish(RdbParser<?> parser) {
+
+	}
 }

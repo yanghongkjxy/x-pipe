@@ -1,11 +1,13 @@
 package com.ctrip.xpipe.redis.keeper.store;
 
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
+import com.ctrip.xpipe.gtid.GtidSet;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
 import com.ctrip.xpipe.redis.core.store.*;
 import io.netty.buffer.ByteBuf;
 
 import java.io.IOException;
+import java.util.concurrent.ExecutorService;
 
 /**
  * @author marsqing
@@ -22,6 +24,18 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 	public RdbOnlyReplicationStore(DumpedRdbStore dumpedRdbStore) {
 		this.dumpedRdbStore = dumpedRdbStore;
 		metaStore = new MetaStore() {
+
+			@Override
+			public ReplicationStoreMeta rdbConfirm(String replId, long beginOffset, String gtidSet, String rdbFile,
+												   RdbStore.Type type, EofType eofType, String cmdFilePrefix) throws IOException {
+				throw new UnsupportedOperationException();
+			}
+
+			@Override
+			public ReplicationStoreMeta checkReplIdAndUpdateRdbInfo(String rdbFile, RdbStore.Type type, EofType eofType,
+																	long rdbOffset, String gtidSet, String expectedReplId) throws IOException {
+				throw new UnsupportedOperationException();
+			}
 
 			@Override
 			public void setMasterAddress(DefaultEndPoint endpoint) {
@@ -101,7 +115,17 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 			}
 
 			@Override
-			public ReplicationStoreMeta rdbUpdated(String rdbFile, EofType eofType, long masterOffset)
+			public boolean attachRdbGtidSet(String rdbFile, String gtidSet) throws IOException {
+				throw new UnsupportedOperationException();
+			}
+
+			@Override
+			public ReplicationStoreMeta continueFromOffset(String replId, long beginOffset, String cmdFilePrefix) throws IOException {
+				throw new UnsupportedOperationException();
+			}
+
+			@Override
+			public ReplicationStoreMeta checkReplIdAndUpdateRdbInfo(String rdbFile, EofType eofType, long masterOffset, String expectedReplId)
 					throws IOException {
 				throw new UnsupportedOperationException();
 			}
@@ -111,17 +135,48 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 			public void setRdbFileSize(long rdbFileSize) throws IOException {
 			}
 
+			@Override
+			public void releaseRdbFile(String rdbFile) throws IOException {
+				throw new UnsupportedOperationException();
+			}
 		};
 	}
 
 	@Override
-	public void close() throws IOException {
+	public void checkReplId(String expectReplId) {
+		throw new UnsupportedOperationException();
 	}
 
 	@Override
-	public RdbStore beginRdb(String replId, long rdbOffset, EofType eofType) throws IOException {
+	public void confirmRdb(RdbStore rdbStore) throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public void checkReplIdAndUpdateRdb(RdbStore rdbStore) throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public FULLSYNC_FAIL_CAUSE fullSyncIfPossible(FullSyncListener fullSyncListener, boolean masterSupportRordb) throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public void close() throws IOException {
+		dumpedRdbStore.close();
+	}
+
+	@Override
+	public void destroy() throws Exception {
+		dumpedRdbStore.destroy();
+	}
+
+	@Override
+	public RdbStore prepareRdb(String replId, long rdbOffset, EofType eofType) throws IOException {
 		this.replId = replId;
 		this.rdbOffset = rdbOffset;
+		dumpedRdbStore.setReplId(replId);
 		dumpedRdbStore.setRdbOffset(this.rdbOffset);
 		dumpedRdbStore.setEofType(eofType);
 		return dumpedRdbStore;
@@ -138,11 +193,6 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 	}
 
 	@Override
-	public void destroy() {
-		throw new UnsupportedOperationException();
-	}
-
-	@Override
 	public MetaStore getMetaStore() {
 		return metaStore;
 	}
@@ -153,7 +203,7 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 	}
 
 	@Override
-	public boolean fullSyncIfPossible(FullSyncListener fullSyncListener) throws IOException {
+	public FULLSYNC_FAIL_CAUSE fullSyncIfPossible(FullSyncListener fullSyncListener) throws IOException {
 		throw new UnsupportedOperationException();
 	}
 
@@ -173,7 +223,17 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 	}
 
 	@Override
-	public void addCommandsListener(long offset, CommandsListener commandsListener) throws IOException {
+	public GtidSet getBeginGtidSet() throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public GtidSet getEndGtidSet() {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public boolean supportGtidSet() {
 		throw new UnsupportedOperationException();
 	}
 
@@ -183,7 +243,12 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 	}
 
 	@Override
-	public void rdbUpdated(DumpedRdbStore dumpedRdbStore) throws IOException {
+	public void addCommandsListener(ReplicationProgress<?> progress, CommandsListener commandsListener) throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public FULLSYNC_FAIL_CAUSE createIndexIfPossible(ExecutorService indexingExecutors) {
 		throw new UnsupportedOperationException();
 	}
 
@@ -199,6 +264,16 @@ public class RdbOnlyReplicationStore implements ReplicationStore {
 
 	@Override
 	public void shiftReplicationId(String newReplId) throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public void continueFromOffset(String replId, long continueOffset) throws IOException {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public long lastReplDataUpdatedAt() {
 		throw new UnsupportedOperationException();
 	}
 }

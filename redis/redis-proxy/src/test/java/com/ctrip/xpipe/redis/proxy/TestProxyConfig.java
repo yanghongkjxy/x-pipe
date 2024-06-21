@@ -42,6 +42,11 @@ public class TestProxyConfig implements ProxyConfig {
     }
 
     @Override
+    public int socketStatsCheckInterval() {
+        return 1000;
+    }
+
+    @Override
     public boolean noTlsNettyHandler() {
         return false;
     }
@@ -84,6 +89,11 @@ public class TestProxyConfig implements ProxyConfig {
                 return AlgorithmType.ZSTD;
             }
         };
+    }
+
+    @Override
+    public boolean shouldReportTraffic() {
+        return true;
     }
 
     @Override

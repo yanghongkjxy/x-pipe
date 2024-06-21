@@ -1,13 +1,13 @@
 package com.ctrip.xpipe.redis.console.migration.status.migration;
 
+import com.ctrip.xpipe.api.migration.OuterClientException;
 import com.ctrip.xpipe.migration.AbstractOuterClientService;
 import com.ctrip.xpipe.redis.console.migration.model.ClusterStepResult;
 import com.ctrip.xpipe.redis.console.migration.model.ShardMigrationStep;
-import com.google.common.collect.Lists;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import static org.mockito.Mockito.*;
 
@@ -34,21 +34,28 @@ public class MigrationCheckingStateTest extends AbstractMigrationStateTest {
 
         when(migrationCluster.getOuterClientService()).thenReturn(new AbstractOuterClientService() {
             @Override
-            public ClusterInfo getClusterInfo(String clusterName) throws Exception {
-                ClusterInfo clusterInfo = new ClusterInfo();
-                return clusterInfo;
+            public boolean clusterMigratePreCheck(String clusterName) throws OuterClientException {
+                return true;
+            }
+
+            @Override
+            public DcMeta getOutClientDcMeta(String dc) throws Exception {
+                return null;
             }
         });
 
         checkingState.action();
-        verify(migrationCluster).markCheckFail(anyString());
+        verify(migrationCluster, never()).markCheckFail(anyString());
 
         when(migrationCluster.getOuterClientService()).thenReturn(new AbstractOuterClientService() {
             @Override
-            public ClusterInfo getClusterInfo(String clusterName) throws Exception {
-                ClusterInfo clusterInfo = new ClusterInfo();
-                clusterInfo.setGroups(Lists.newArrayList(new GroupInfo()));
-                return clusterInfo;
+            public boolean clusterMigratePreCheck(String clusterName) throws OuterClientException {
+                return false;
+            }
+
+            @Override
+            public DcMeta getOutClientDcMeta(String dc) throws Exception {
+                return null;
             }
         });
 

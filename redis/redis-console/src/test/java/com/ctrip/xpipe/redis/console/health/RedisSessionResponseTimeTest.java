@@ -1,10 +1,11 @@
 package com.ctrip.xpipe.redis.console.health;
 
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
+import com.ctrip.xpipe.redis.checker.config.CheckerConfig;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.PingCallback;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.RedisSession;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
-import com.ctrip.xpipe.redis.console.healthcheck.session.PingCallback;
-import com.ctrip.xpipe.redis.console.healthcheck.session.RedisSession;
-import com.ctrip.xpipe.redis.console.spring.ConsoleContextConfig;
+import com.ctrip.xpipe.redis.core.protocal.pojo.Role;
 import com.ctrip.xpipe.simpleserver.Server;
 import org.junit.After;
 import org.junit.Assert;
@@ -14,6 +15,8 @@ import org.junit.Test;
 import javax.annotation.Resource;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
+
+import static com.ctrip.xpipe.spring.AbstractSpringConfigContext.GLOBAL_EXECUTOR;
 
 public class RedisSessionResponseTimeTest extends AbstractConsoleIntegrationTest {
 
@@ -27,8 +30,11 @@ public class RedisSessionResponseTimeTest extends AbstractConsoleIntegrationTest
 
     private static final String CHECK_CHANNEL = "xpipe-health-check";
 
-    @Resource(name = ConsoleContextConfig.GLOBAL_EXECUTOR)
+    @Resource(name = GLOBAL_EXECUTOR)
     private ExecutorService executors;
+
+    @Resource
+    private CheckerConfig config;
 
     @Before
     public void beforeRedisSessionTest() throws Exception {
@@ -43,7 +49,7 @@ public class RedisSessionResponseTimeTest extends AbstractConsoleIntegrationTest
                 return "+OK\r\n";
             }
         });
-        redisSession = new RedisSession(new DefaultEndPoint(HOST, BLOCKED_PORT), scheduled, getXpipeNettyClientKeyedObjectPool());
+        redisSession = new RedisSession(new DefaultEndPoint(HOST, BLOCKED_PORT), scheduled, getXpipeNettyClientKeyedObjectPool(), config);
     }
 
     @Test
@@ -51,7 +57,7 @@ public class RedisSessionResponseTimeTest extends AbstractConsoleIntegrationTest
 
         long begin = System.currentTimeMillis();
         for(int i = 0; i < COUNT; i++) {
-            redisSession.subscribeIfAbsent(CHECK_CHANNEL, new RedisSession.SubscribeCallback() {
+            redisSession.subscribeIfAbsent(new RedisSession.SubscribeCallback() {
 
                 @Override
                 public void message(String channel, String message) {
@@ -62,7 +68,7 @@ public class RedisSessionResponseTimeTest extends AbstractConsoleIntegrationTest
                 public void fail(Throwable e) {
                     System.out.println(e.getMessage());
                 }
-            });
+            }, CHECK_CHANNEL);
         }
         long after = System.currentTimeMillis();
         Assert.assertTrue(after - begin < TIMEOUT);
@@ -104,7 +110,7 @@ public class RedisSessionResponseTimeTest extends AbstractConsoleIntegrationTest
         for(int i = 0; i < COUNT; i++) {
             redisSession.role(new RedisSession.RollCallback() {
                 @Override
-                public void role(String role) {
+                public void role(String role, Role detail) {
 
                 }
 

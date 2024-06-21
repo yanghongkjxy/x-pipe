@@ -31,7 +31,7 @@
             <tr ng-repeat="shard in shards">
                 <td>{{shard.shardName}}</td>
                 <td>{{shard.setinelMonitorName}}</td>
-                <td ng-repeat="dc in clusterDcs">{{shard.sentinels[dc.id].setinelAddress}}</td>
+                <td ng-repeat="dc in clusterDcs">{{shard.sentinels[dc.id].sentinelsAddressString}}</td>
                 <td>
                     <a ng-click="preDeleteShard(shard.shardName)">删除</a>
                 </td>
@@ -78,13 +78,18 @@
 						<td data-title="'机房'">{{dc.dcName}}</td>
 						<td data-title="'Sentinels'">
 							<select class="form-control" ng-model="shard.sentinels[dc.id]"
-								ng-options="sentinel.setinelAddress for sentinel in sentinels[dc.dcName]">
+								ng-options="sentinel.sentinelsAddressString for sentinel in sentinels[dc.dcName]">
 								<option></option>
 							</select>
 						</td>
 						</tr>
 					</table>
                     </div>
+                </div>
+                <div class="form-group text-center">
+                    <p style="font-size:12px">该方式只能创建对称分片的shard，如果需要创建非对称分片的shard,
+                        <a style="color:red;font-size:14px" ng-click="gotoUpdateCluster()">请访问集群修改页面</a>
+                    </p>
                 </div>
             </div>
             <div class="modal-footer">

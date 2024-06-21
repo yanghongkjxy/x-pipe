@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.proxy.integrate;
 
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.redis.proxy.DefaultProxyServer;
 import com.ctrip.xpipe.redis.proxy.TestProxyConfig;
 import io.netty.buffer.ByteBuf;
@@ -8,6 +9,8 @@ import io.netty.buffer.UnpooledByteBufAllocator;
 import io.netty.channel.ChannelFuture;
 import org.junit.*;
 
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,7 +44,7 @@ public class TestMassTCPPacketWithOneProxyServer extends AbstractProxyIntegratio
     }
 
     @Test
-    public void testStability() throws TimeoutException, InterruptedException {
+    public void testStability() throws TimeoutException, InterruptedException, ExecutionException {
         int port = randomPort();
         String protocol = generateProxyProtocol(port);
         String message = randomString(10 * 10000);
@@ -77,14 +80,17 @@ public class TestMassTCPPacketWithOneProxyServer extends AbstractProxyIntegratio
 
         ByteBuf expected = UnpooledByteBufAllocator.DEFAULT.buffer().writeBytes(message.getBytes());
 
-        Assert.assertEquals(0, ByteBufUtil.compare(expected, byteBufAtomicReference.get()));
-
+        waitConditionUntilTimeOut(() -> {
+            int rst = ByteBufUtil.compare(expected, byteBufAtomicReference.get());
+            logger.info("[testStability] cmp rst: {}", rst);
+            return 0 == rst;
+        }, 10000, 1000);
         expected.release();
     }
 
     @Ignore
     @Test
-    public void testStabilityWithTwo() throws TimeoutException, InterruptedException {
+    public void testStabilityWithTwo() throws TimeoutException, InterruptedException, ExecutionException {
         int port1 = randomPort(), port2 = randomPort();
         String protocol1 = generateProxyProtocol(port1);
         String protocol2 = generateProxyProtocol(port2);
@@ -106,64 +112,62 @@ public class TestMassTCPPacketWithOneProxyServer extends AbstractProxyIntegratio
         String total1 = protocol1 + message1;
         String total2 = protocol2 + message2;
 
-        new Thread(
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        int index = 3;
-                        String sendout = total1.substring(0, index);
-                        write(clientFuture1, sendout);
+        new Thread(new AbstractExceptionLogTask() {
+            @Override
+            protected void doRun() throws Exception {
+                int index = 3;
+                String sendout = total1.substring(0, index);
+                write(clientFuture1, sendout);
 
-                        for(int i = 0; i < 2; i++) {
-                            write(clientFuture1, total1.substring(index, ++index));
-                        }
+                for(int i = 0; i < 2; i++) {
+                    write(clientFuture1, total1.substring(index, ++index));
+                }
 
-                        while(index < total1.length()) {
-                            int pivot = index + 1;
-                            do {
-                                pivot = randomInt(index + 1, total1.length() + 1);
-                            } while(pivot > total1.length());
-                            sendout = total1.substring(index, pivot);
-                            write(clientFuture1, sendout);
-                            index = pivot;
-                            try {
-                                Thread.sleep(5);
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
-                            }
-                        }
+                while(index < total1.length()) {
+                    int pivot = index + 1;
+                    do {
+                        pivot = randomInt(index + 1, total1.length() + 1);
+                    } while(pivot > total1.length());
+                    sendout = total1.substring(index, pivot);
+                    write(clientFuture1, sendout);
+                    index = pivot;
+                    try {
+                        Thread.sleep(5);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
                     }
                 }
+            }
+        }
         ).start();
 
-        new Thread(
-                new Runnable() {
-                    @Override
-                    public void run() {
-                        int index = 3;
-                        String sendout = total2.substring(0, index);
-                        write(clientFuture2, sendout);
+        new Thread(new AbstractExceptionLogTask() {
+            @Override
+            protected void doRun() throws Exception {
+                int index = 3;
+                String sendout = total2.substring(0, index);
+                write(clientFuture2, sendout);
 
-                        for(int i = 0; i < 2; i++) {
-                            write(clientFuture2, total2.substring(index, ++index));
-                        }
+                for(int i = 0; i < 2; i++) {
+                    write(clientFuture2, total2.substring(index, ++index));
+                }
 
-                        while(index < total2.length()) {
-                            int pivot;
-                            do {
-                                pivot = randomInt(index + 1, total2.length() + 1);
-                            } while(pivot > total2.length());
-                            sendout = total2.substring(index, pivot);
-                            write(clientFuture2, sendout);
-                            index = pivot;
-                            try {
-                                Thread.sleep(5);
-                            } catch (InterruptedException e) {
-                                e.printStackTrace();
-                            }
-                        }
+                while(index < total2.length()) {
+                    int pivot;
+                    do {
+                        pivot = randomInt(index + 1, total2.length() + 1);
+                    } while(pivot > total2.length());
+                    sendout = total2.substring(index, pivot);
+                    write(clientFuture2, sendout);
+                    index = pivot;
+                    try {
+                        Thread.sleep(5);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
                     }
                 }
+            }
+        }
         ).start();
 
         Thread.sleep(1000 * 3);
@@ -184,7 +188,7 @@ public class TestMassTCPPacketWithOneProxyServer extends AbstractProxyIntegratio
 
     @Ignore
     @Test
-    public void testStabilityWithN() throws TimeoutException, InterruptedException {
+    public void testStabilityWithN() throws TimeoutException, InterruptedException, ExecutionException {
         int N = 100;
         int[] port = new int[N];
         String[] protocol = new String[N], message = new String[N], total = new String[N];
@@ -208,9 +212,9 @@ public class TestMassTCPPacketWithOneProxyServer extends AbstractProxyIntegratio
         AtomicInteger counter = new AtomicInteger(0);
         for(int i = 0; i < N; i++) {
             int finalI = i;
-            new Thread(new Runnable() {
+            new Thread(new AbstractExceptionLogTask() {
                 @Override
-                public void run() {
+                protected void doRun() throws Exception {
                     int index = 3;
                     String sendout = total[finalI].substring(0, index);
                     write(clientFuture[finalI], sendout);

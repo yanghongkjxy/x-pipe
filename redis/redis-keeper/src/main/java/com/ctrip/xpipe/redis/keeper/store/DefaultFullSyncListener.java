@@ -1,17 +1,18 @@
 package com.ctrip.xpipe.redis.keeper.store;
 
 import com.ctrip.xpipe.netty.filechannel.ReferenceFileRegion;
-import com.ctrip.xpipe.redis.core.protocal.cmd.DefaultPsync;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
-import com.ctrip.xpipe.redis.core.protocal.protocal.SimpleStringParser;
+import com.ctrip.xpipe.redis.core.store.CommandFile;
 import com.ctrip.xpipe.redis.core.store.FullSyncListener;
+import com.ctrip.xpipe.redis.core.store.RdbStore;
+import com.ctrip.xpipe.redis.core.store.ReplicationProgress;
 import com.ctrip.xpipe.redis.keeper.RedisSlave;
-import com.ctrip.xpipe.utils.StringUtil;
 import io.netty.channel.ChannelFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -32,6 +33,11 @@ public class DefaultFullSyncListener implements FullSyncListener {
 	}
 
 	@Override
+	public boolean supportRdb(RdbStore.Type rdbType) {
+		return redisSlave.supportRdb(rdbType);
+	}
+
+	@Override
 	public void onFileData(ReferenceFileRegion referenceFileRegion) {
 		
 		if (referenceFileRegion == null) {
@@ -46,20 +52,17 @@ public class DefaultFullSyncListener implements FullSyncListener {
 		redisSlave.writeFile(referenceFileRegion);
 	}
 
-	@Override
-	public void setRdbFileInfo(EofType eofType, long rdbOffset) {
-
+	public void setRdbFileInfo(EofType eofType, ReplicationProgress<?> progress) {
 		if (logger.isInfoEnabled()) {
-			logger.info("[setRdbFileInfo]eofType:" + eofType + ",rdbFileOffset:" + rdbOffset);
+			logger.info("[setRdbFileInfo]eofType:" + eofType + ",progress:" + progress);
 		}
 
-		SimpleStringParser simpleStringParser = new SimpleStringParser(StringUtil.join(" ", DefaultPsync.FULL_SYNC,
-				redisSlave.getRedisKeeperServer().getKeeperRepl().replId(), String.valueOf(rdbOffset)));
+		redisSlave.beginWriteRdb(eofType, progress);
+	}
 
-		logger.info("[setRdbFileInfo]{},{}", simpleStringParser.getPayload(), redisSlave);
-		redisSlave.sendMessage(simpleStringParser.format());
-
-		redisSlave.beginWriteRdb(eofType, rdbOffset);
+	@Override
+	public boolean supportProgress(Class<? extends ReplicationProgress<?>> clazz) {
+		return redisSlave.supportProgress(clazz);
 	}
 
 	@Override
@@ -83,14 +86,18 @@ public class DefaultFullSyncListener implements FullSyncListener {
 	}
 
 	@Override
-	public ChannelFuture onCommand(ReferenceFileRegion referenceFileRegion) {
-		
-		return redisSlave.onCommand(referenceFileRegion);
+	public ChannelFuture onCommand(CommandFile currentFile, long filePosition, Object cmd) {
+		return redisSlave.onCommand(currentFile, filePosition, cmd);
 	}
 
 	@Override
 	public void beforeCommand() {
 		redisSlave.beforeCommand();
+	}
+
+	@Override
+	public Long processedOffset() {
+		return redisSlave.getAck();
 	}
 
 	@Override

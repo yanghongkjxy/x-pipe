@@ -3,14 +3,15 @@ package com.ctrip.xpipe.redis.keeper.store;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.observer.AbstractLifecycleObservable;
 import com.ctrip.xpipe.observer.NodeAdded;
-import com.ctrip.xpipe.redis.core.store.ReplicationStore;
-import com.ctrip.xpipe.redis.core.store.ReplicationStoreManager;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOpParser;
+import com.ctrip.xpipe.redis.core.store.*;
 import com.ctrip.xpipe.redis.core.util.NonFinalizeFileInputStream;
 import com.ctrip.xpipe.redis.core.util.NonFinalizeFileOutputStream;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.monitor.KeeperMonitor;
-import com.ctrip.xpipe.utils.ClusterShardAwareThreadFactory;
+import com.ctrip.xpipe.redis.keeper.util.KeeperReplIdAwareThreadFactory;
 import com.ctrip.xpipe.utils.FileUtils;
+import com.google.common.io.Files;
 import com.google.common.util.concurrent.MoreExecutors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,290 +29,341 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author marsqing
- *
- *         May 31, 2016 5:33:46 PM
+ * <p>
+ * May 31, 2016 5:33:46 PM
  */
 public class DefaultReplicationStoreManager extends AbstractLifecycleObservable implements ReplicationStoreManager {
 
-	private final static String META_FILE = "store_manager_meta.properties";
+    private final static String META_FILE = "store_manager_meta.properties";
 
-	private static final String LATEST_STORE_DIR = "latest.store.dir";
+    private static final String LATEST_STORE_DIR = "latest.store.dir";
 
-	private Logger logger = LoggerFactory.getLogger(getClass());
+    private final Logger logger = LoggerFactory.getLogger(getClass());
 
-	private String clusterName;
+    private final ReplId replId;
 
-	private String shardName;
-	
-	private String keeperRunid;
+    private final String keeperRunid;
 
-	private File baseDir;
+    private final File keeperBaseDir;
 
-	private File metaFile;
+    private File baseDir;
 
-	private AtomicReference<Properties> currentMeta = new AtomicReference<Properties>();
+    private File metaFile;
 
-	private AtomicReference<ReplicationStore> currentStore = new AtomicReference<>();
+    private final AtomicReference<Properties> currentMeta = new AtomicReference<Properties>();
 
-	private KeeperConfig keeperConfig;
-	
-	private AtomicLong gcCount = new AtomicLong();
-	
-	private ScheduledFuture<?> gcFuture;
-	
-	private ScheduledExecutorService scheduled;
+    private final AtomicReference<ReplicationStore> currentStore = new AtomicReference<>();
 
-	private KeeperMonitor keeperMonitor;
-	
-	public DefaultReplicationStoreManager(KeeperConfig keeperConfig, String clusterName, String shardName, String keeperRunid, File baseDir, KeeperMonitor keeperMonitor) {
-		super(MoreExecutors.directExecutor());
-		this.clusterName = clusterName;
-		this.shardName = shardName;
-		this.keeperRunid = keeperRunid;
-		this.keeperConfig = keeperConfig;
-		this.baseDir = new File(baseDir, clusterName + "/" + shardName);
-		metaFile = new File(this.baseDir, META_FILE);
-		this.keeperMonitor = keeperMonitor;
-	}
-	
-	@Override
-	protected void doInitialize() throws Exception {
-		super.doInitialize();
-		
-		scheduled =  Executors.newScheduledThreadPool(1,
-				ClusterShardAwareThreadFactory.create(clusterName, shardName, "gc-" + String.format("%s-%s", clusterName, shardName)));
-		gcFuture = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
-			
-			@Override
-			protected void doRun() throws Exception {
-				gc();
-			}
-		}, keeperConfig.getReplicationStoreGcIntervalSeconds(), keeperConfig.getReplicationStoreGcIntervalSeconds(), TimeUnit.SECONDS);
+    private final KeeperConfig keeperConfig;
 
-	}
-	
-	@Override
-	protected void doDispose() throws Exception {
+    private final AtomicLong gcCount = new AtomicLong();
 
-		closeCurrentStore();
-		gcFuture.cancel(true);
-		scheduled.shutdownNow();
-		super.doDispose();
-	}
+    private ScheduledFuture<?> gcFuture;
 
-	private void closeCurrentStore() {
-		
-		logger.info("[closeCurrentStore]{}", this);
-		ReplicationStore replicationStore = currentStore.get();
-		if(replicationStore != null){
-			try {
-				replicationStore.close();
-				currentStore.set(null);
-			} catch (IOException e) {
-				logger.info("[close]" + replicationStore, e);
-			}
-		}
-	}
+    private ScheduledExecutorService scheduled;
 
-	@Override
-	public synchronized ReplicationStore createIfNotExist() throws IOException {
+    private final KeeperMonitor keeperMonitor;
 
+    private final RedisOpParser redisOpParser;
 
+    public DefaultReplicationStoreManager(KeeperConfig keeperConfig, ReplId replId,
+                                          String keeperRunid, File baseDir, KeeperMonitor keeperMonitor) {
+        this(keeperConfig, replId, keeperRunid, baseDir, keeperMonitor, null);
+    }
 
-		ReplicationStore currentReplicationStore = null;
-		
-		try{
-			currentReplicationStore = getCurrent();
-		}catch(Exception e){
-			logger.error("[createIfNotExist]" + baseDir, e);
-		}
-		
-		if (currentReplicationStore == null) {
-			logger.info("[createIfNotExist]{}", baseDir);
-			currentReplicationStore = create();
-		}
-		return currentReplicationStore;
-	}
-	
-	@Override
-	public synchronized ReplicationStore create() throws IOException {
+    public DefaultReplicationStoreManager(KeeperConfig keeperConfig, ReplId replId,
+                                          String keeperRunid, File baseDir, KeeperMonitor keeperMonitor, RedisOpParser redisOpParser) {
+        super(MoreExecutors.directExecutor());
+        this.replId = replId;
+        this.keeperRunid = keeperRunid;
+        this.keeperConfig = keeperConfig;
+        this.keeperMonitor = keeperMonitor;
+        this.keeperBaseDir = baseDir;
+        this.redisOpParser = redisOpParser;
+    }
 
-		if(!getLifecycleState().isInitialized()){
-			throw new ReplicationStoreManagerStateException("can not create", toString(), getLifecycleState().getPhaseName());
-		}
-		
-		keeperMonitor.getReplicationStoreStats().increateReplicationStoreCreateCount();
+    @Override
+    protected void doInitialize() throws Exception {
 
-		File storeBaseDir = new File(baseDir, UUID.randomUUID().toString());
-		storeBaseDir.mkdirs();
+        this.baseDir = new File(keeperBaseDir, replId.toString());
+        this.metaFile = new File(this.baseDir, META_FILE);
 
-		logger.info("[create]{}", storeBaseDir);
+        scheduled = Executors.newScheduledThreadPool(1,
+                KeeperReplIdAwareThreadFactory.create(replId.toString(), "gc-" + replId.toString()));
 
-		recrodLatestStore(storeBaseDir.getName());
+        gcFuture = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
 
-		ReplicationStore replicationStore = new DefaultReplicationStore(storeBaseDir, keeperConfig, keeperRunid, keeperMonitor);
+            @Override
+            protected void doRun() throws Exception {
+                gc();
+            }
+        }, keeperConfig.getReplicationStoreGcIntervalSeconds(), keeperConfig.getReplicationStoreGcIntervalSeconds(), TimeUnit.SECONDS);
+    }
 
-		closeCurrentStore();
-		
-		currentStore.set(replicationStore);
-		
-		notifyObservers(new NodeAdded<ReplicationStore>(replicationStore));
-		return currentStore.get();
-	}
+    @Override
+    protected void doDispose() throws Exception {
+        closeCurrentStore();
+        gcFuture.cancel(true);
+        scheduled.shutdownNow();
+    }
 
-	private void recrodLatestStore(String storeDir) throws IOException {
-		Properties meta = currentMeta();
-		if (meta == null) {
-			meta = new Properties();
-		}
+    private void closeCurrentStore() {
 
-		meta.setProperty(LATEST_STORE_DIR, storeDir);
+        logger.info("[closeCurrentStore]{}", this);
+        ReplicationStore replicationStore = currentStore.get();
+        if (replicationStore != null) {
+            try {
+                replicationStore.close();
+                currentStore.set(null);
+            } catch (IOException e) {
+                logger.info("[close]" + replicationStore, e);
+            }
+        }
+    }
 
-		saveMeta(meta);
-	}
+    @Override
+    public synchronized ReplicationStore createIfNotExist() throws IOException {
 
-	/**
-	 * @param meta
-	 * @throws IOException
-	 */
-	private void saveMeta(Properties meta) throws IOException {
-		try (OutputStream out = new NonFinalizeFileOutputStream(metaFile)) {
-			meta.store(out, null);
-		}
-		logger.info("[saveMeta][before]{}", currentMeta.get());
-		currentMeta.set(meta);
-		logger.info("[saveMeta][after]{}", currentMeta.get());
-	}
+        ReplicationStore currentReplicationStore = null;
 
-	/**
-	 * @return
-	 * @throws IOException
-	 */
-	private Properties loadMeta() throws IOException {
-		
-		if (metaFile.isFile()) {
-			Properties meta = new Properties();
-			try (InputStream in = new NonFinalizeFileInputStream(metaFile)) {
-				meta.load(in);
-			}
-			return meta;
-		}
+        try {
+            currentReplicationStore = getCurrent();
+        } catch (Exception e) {
+            logger.error("[createIfNotExist]" + baseDir, e);
+        }
 
-		return null;
-	}
+        if (currentReplicationStore == null) {
+            logger.info("[createIfNotExist]{}", baseDir);
+            currentReplicationStore = create();
+        }
+        return currentReplicationStore;
+    }
 
-	private Properties currentMeta() throws IOException {
-		
-		return currentMeta(false);
-	}
+    @Override
+    public synchronized ReplicationStore create() throws IOException {
 
-	private Properties currentMeta(boolean forceLoad) throws IOException {
-		
-		if(forceLoad || currentMeta.get() == null){
-			currentMeta.set(loadMeta());
-		}
-		return currentMeta.get();
-	}
+        if (!getLifecycleState().isInitialized()) {
+            throw new ReplicationStoreManagerStateException("can not create", toString(), getLifecycleState().getPhaseName());
+        }
 
-	@Override
-	public synchronized ReplicationStore getCurrent() throws IOException {
-		
-		if (currentStore.get() == null) {
-			Properties meta = currentMeta();
-			if (meta != null) {
-				if (meta.getProperty(LATEST_STORE_DIR) != null) {
-					File latestStoreDir = new File(baseDir, meta.getProperty(LATEST_STORE_DIR));
-					logger.info("[getCurrent][latest]{}", latestStoreDir);
-					if (latestStoreDir.isDirectory()) {
-						currentStore.set(new DefaultReplicationStore(latestStoreDir, keeperConfig, keeperRunid, keeperMonitor));
-					}
-				}
-			}
-		}
+        keeperMonitor.getReplicationStoreStats().increateReplicationStoreCreateCount();
 
-		ReplicationStore replicationStore = currentStore.get();
-		if(replicationStore != null && !replicationStore.checkOk()){
-			logger.info("[getCurrent][store not ok, return null]{}", replicationStore);
-			return null;
-		}
-		return currentStore.get();
-	}
+        File storeBaseDir = new File(baseDir, UUID.randomUUID().toString());
+        storeBaseDir.mkdirs();
 
-	@Override
-	public String getClusterName() {
-		return clusterName;
-	}
+        logger.info("[create]{}", storeBaseDir);
 
-	@Override
-	public String getShardName() {
-		return shardName;
-	}
+        recrodLatestStore(storeBaseDir.getName());
 
-	protected synchronized void gc() throws IOException {
-		
-		logger.debug("[gc]{}", this);
+        ReplicationStore replicationStore = createReplicationStore(storeBaseDir, keeperConfig, keeperRunid, keeperMonitor);
 
-		gcCount.incrementAndGet();
-		Properties meta = currentMeta(true);
-		final String currentDirName;
-		if (meta != null) {
-			currentDirName = meta.getProperty(LATEST_STORE_DIR);
-			File[] replicationStoreDirs = baseDir.listFiles(new FileFilter() {
+        closeCurrentStore();
 
-				@Override
-				public boolean accept(File path) {
-					return path.isDirectory() && !currentDirName.equals(path.getName());
-				}
-			});
+        currentStore.set(replicationStore);
 
-			if (replicationStoreDirs != null && replicationStoreDirs.length > 0) {
-				
-				logger.info("[GC][old replicationstore]newest:{}", currentDirName);
-				for (File dir : replicationStoreDirs) {
-					if(System.currentTimeMillis() - dir.lastModified() > keeperConfig.getReplicationStoreMinTimeMilliToGcAfterCreate()){
-						logger.info("[GC] directory {}", dir.getCanonicalPath());
-						FileUtils.recursiveDelete(dir);
-					}else{
-						logger.warn("[GC][directory is created too short, do not gc]{}, {}", dir, new Date(dir.lastModified()));
-					}
-				}
-			}
-		}
+        notifyObservers(new NodeAdded<ReplicationStore>(replicationStore));
+        return currentStore.get();
+    }
 
-		// gc current ReplicationStore
-		ReplicationStore replicationStore = getCurrent();
-		if (replicationStore != null) {
-			replicationStore.gc();
-		}
-	}
+    protected ReplicationStore createReplicationStore(File storeBaseDir, KeeperConfig keeperConfig, String keeperRunid,
+                                                      KeeperMonitor keeperMonitor) throws IOException {
+        return new GtidReplicationStore(storeBaseDir, keeperConfig, keeperRunid, keeperMonitor, redisOpParser);
+    }
 
-	@Override
-	public void destroy() throws Exception {
-		
-		logger.info("[destroy]{}", this);
-		
-		ReplicationStore currentReplicationStore = getCurrent();
-		if(currentReplicationStore != null){
-			try{
-				currentReplicationStore.destroy();
-			}catch(Throwable th){
-				logger.error("[destroy]", th);
-			}
-		}
-		FileUtils.recursiveDelete(this.baseDir);
-	}
+    private void recrodLatestStore(String storeDir) throws IOException {
+        Properties meta = currentMeta();
+        if (meta == null) {
+            meta = new Properties();
+        }
 
-	public long getGcCount() {
-		return gcCount.get();
-	}
-	
-	@Override
-	public String toString() {
-		return String.format("cluster:%s, shard:%s, keeperRunId:%s, baseDir:%s, currentMeta:%s", clusterName, shardName, keeperRunid, baseDir, 
-				currentMeta.get() == null?"": currentMeta.get().toString());
-	}
-	
-	public File getBaseDir() {
-		return baseDir;
-	}
+        meta.setProperty(LATEST_STORE_DIR, storeDir);
+
+        saveMeta(meta);
+    }
+
+    /**
+     * @param meta
+     * @throws IOException
+     */
+    private void saveMeta(Properties meta) throws IOException {
+        try (OutputStream out = new NonFinalizeFileOutputStream(metaFile)) {
+            meta.store(out, null);
+        }
+        logger.info("[saveMeta][before]{}", currentMeta.get());
+        currentMeta.set(meta);
+        logger.info("[saveMeta][after]{}", currentMeta.get());
+    }
+
+    /**
+     * @return
+     * @throws IOException
+     */
+    private Properties loadMeta() throws IOException {
+
+        if (metaFile.isFile()) {
+            Properties meta = new Properties();
+            try (InputStream in = new NonFinalizeFileInputStream(metaFile)) {
+                meta.load(in);
+            }
+            return meta;
+        }
+
+        return null;
+    }
+
+    private Properties currentMeta() throws IOException {
+
+        return currentMeta(false);
+    }
+
+    private Properties currentMeta(boolean forceLoad) throws IOException {
+
+        if (forceLoad || currentMeta.get() == null) {
+            currentMeta.set(loadMeta());
+        }
+        return currentMeta.get();
+    }
+
+    @Override
+    public synchronized ReplicationStore getCurrent() throws IOException {
+
+        if (currentStore.get() == null) {
+            Properties meta = currentMeta();
+            if (meta != null) {
+                if (meta.getProperty(LATEST_STORE_DIR) != null) {
+                    File latestStoreDir = new File(baseDir, meta.getProperty(LATEST_STORE_DIR));
+                    logger.info("[getCurrent][latest]{}", latestStoreDir);
+                    if (latestStoreDir.isDirectory()) {
+                        currentStore.set(createReplicationStore(latestStoreDir, keeperConfig, keeperRunid, keeperMonitor));
+                    }
+                }
+            }
+        }
+
+        ReplicationStore replicationStore = currentStore.get();
+        if (replicationStore != null && !replicationStore.checkOk()) {
+            logger.info("[getCurrent][store not ok, return null]{}", replicationStore);
+            return null;
+        }
+        return currentStore.get();
+    }
+
+    @Override
+    public ReplId getReplId() {
+        return replId;
+    }
+
+    protected synchronized void gc() throws IOException {
+
+        logger.debug("[gc]{}", this);
+
+        gcCount.incrementAndGet();
+        Properties meta = currentMeta(true);
+        final String currentDirName;
+        if (meta != null) {
+            currentDirName = meta.getProperty(LATEST_STORE_DIR);
+            File[] replicationStoreDirs = baseDir.listFiles(new FileFilter() {
+
+                @Override
+                public boolean accept(File path) {
+                    return path.isDirectory() && !currentDirName.equals(path.getName());
+                }
+            });
+
+            if (replicationStoreDirs != null && replicationStoreDirs.length > 0) {
+
+                logger.info("[GC][old replicationstore]newest:{}", currentDirName);
+                for (File dir : replicationStoreDirs) {
+                    if (System.currentTimeMillis() - dir.lastModified() > keeperConfig.getReplicationStoreMinTimeMilliToGcAfterCreate()) {
+                        logger.info("[GC] directory {}", dir.getCanonicalPath());
+                        FileUtils.recursiveDelete(dir);
+                    } else {
+                        logger.warn("[GC][directory is created too short, do not gc]{}, {}", dir, new Date(dir.lastModified()));
+                    }
+                }
+            }
+        }
+
+        // gc current ReplicationStore
+        ReplicationStore replicationStore = getCurrent();
+        if (replicationStore != null) {
+            replicationStore.gc();
+        }
+    }
+
+    @Override
+    public void destroy() throws Exception {
+        logger.info("[destroy]{}", this);
+        FileUtils.recursiveDelete(this.baseDir);
+    }
+
+    public long getGcCount() {
+        return gcCount.get();
+    }
+
+    @Override
+    public String toString() {
+        return String.format("repl:%s, keeperRunId:%s, baseDir:%s, currentMeta:%s", replId, keeperRunid, baseDir,
+                currentMeta.get() == null ? "" : currentMeta.get().toString());
+    }
+
+    public File getBaseDir() {
+        return baseDir;
+    }
+
+    public static class ClusterAndShardCompatible extends DefaultReplicationStoreManager {
+
+        private final Logger logger = LoggerFactory.getLogger(ClusterAndShardCompatible.class);
+
+        private final File keeperBaseDir;
+
+        private ReplId replId;
+
+        private ClusterId deprecatedClusterId;
+
+        private ShardId deprecatedShardId;
+
+        public ClusterAndShardCompatible(KeeperConfig keeperConfig, ReplId replId, String keeperRunid,
+                                         File baseDir, KeeperMonitor keeperMonitor, RedisOpParser redisOpParser) {
+            super(keeperConfig, replId, keeperRunid, baseDir, keeperMonitor, redisOpParser);
+            this.keeperBaseDir = baseDir;
+            this.replId = replId;
+        }
+
+        @Override
+        protected void doInitialize() throws Exception {
+
+            renameDeprecatedStore();
+
+            super.doInitialize();
+        }
+
+        public ClusterAndShardCompatible setDeprecatedClusterAndShard(ClusterId clusterId, ShardId shardId) {
+            this.deprecatedClusterId = clusterId;
+            this.deprecatedShardId = shardId;
+            return this;
+        }
+
+        public void renameDeprecatedStore() {
+            if (null == deprecatedClusterId || null == deprecatedShardId) {
+                return;
+            }
+
+            File deprecated = new File(keeperBaseDir, deprecatedClusterId + "/" + deprecatedShardId);
+            File dest = new File(keeperBaseDir, replId.toString());
+
+            File deprecatedParent = new File(keeperBaseDir, deprecatedClusterId.toString());
+            if (deprecated.exists() && !dest.exists()) {
+                try {
+                    keeperBaseDir.mkdirs();
+                    Files.move(deprecated, dest);
+                    logger.info("[renameDeprecatedStore] {} -> {} success", deprecated.getAbsolutePath(), dest.getAbsolutePath());
+                    FileUtils.recursiveDelete(deprecatedParent);
+                } catch (IOException e) {
+                    logger.error("[renameDeprecatedStore] {} -> {} failure", deprecated.getAbsolutePath(), dest.getAbsolutePath(), e);
+                }
+            }
+        }
+    }
+
 }

@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.*;
+import java.util.function.Function;
 
 /**
  * @author wenchao.meng
@@ -17,11 +18,11 @@ import java.util.concurrent.*;
  */
 public class DefaultCommandFuture<V> implements CommandFuture<V>{
 	
-	private Logger logger = LoggerFactory.getLogger(getClass());
+	private static final Logger logger = LoggerFactory.getLogger(DefaultCommandFuture.class);
 	
 	private volatile Object result = null;
 	
-	private final CauseHolder CANCELLED_RESULT = new CauseHolder(new CancellationException());
+	private final static CauseHolder CANCELLED_RESULT = new CauseHolder(new CancellationException());
 	
 	private static final String SUCCESS_NO_RESULT = "SUCCESS_NO_RESULT";
 	
@@ -117,8 +118,16 @@ public class DefaultCommandFuture<V> implements CommandFuture<V>{
         throw new TimeoutException();
     }
 
+	@Override
+	public V getOrHandle(long timeout, TimeUnit unit, Function<Throwable, V> handler) {
+		try {
+			return this.get(timeout, unit);
+		} catch (Throwable t) {
+			return handler.apply(t);
+		}
+	}
 
-    private static final class CauseHolder {
+	private static final class CauseHolder {
         final Throwable cause;
         CauseHolder(Throwable cause) {
             this.cause = cause;

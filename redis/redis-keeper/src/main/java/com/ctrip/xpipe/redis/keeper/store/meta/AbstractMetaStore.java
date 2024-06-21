@@ -1,20 +1,23 @@
 package com.ctrip.xpipe.redis.keeper.store.meta;
 
-import com.alibaba.fastjson.JSON;
+import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
 import com.ctrip.xpipe.redis.core.meta.KeeperState;
 import com.ctrip.xpipe.redis.core.protocal.RedisClientProtocol;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
 import com.ctrip.xpipe.redis.core.store.MetaStore;
+import com.ctrip.xpipe.redis.core.store.RdbStore;
 import com.ctrip.xpipe.redis.core.store.ReplicationStoreMeta;
 import com.ctrip.xpipe.redis.core.store.exception.BadMetaStoreException;
 import com.ctrip.xpipe.redis.keeper.exception.RedisKeeperRuntimeException;
+import com.ctrip.xpipe.redis.keeper.exception.replication.UnexpectedReplIdException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.unidal.helper.Files.IO;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -62,7 +65,7 @@ public abstract class AbstractMetaStore implements MetaStore{
 
 	protected void saveMetaToFile(File file, ReplicationStoreMeta replicationStoreMeta) throws IOException {
 		logger.info("[saveMetaToFile]{}, {}", file, replicationStoreMeta);
-		IO.INSTANCE.writeTo(file, JSON.toJSONString(replicationStoreMeta));
+		IO.INSTANCE.writeTo(file, Codec.DEFAULT.encode(replicationStoreMeta));
 	}
 	
 	protected static ReplicationStoreMeta loadMetaFromFile(File file) throws IOException{
@@ -75,7 +78,7 @@ public abstract class AbstractMetaStore implements MetaStore{
 	}
 	
 	public static ReplicationStoreMeta deserializeFromString(String str){
-		return JSON.parseObject(str, ReplicationStoreMeta.class);
+		return Codec.DEFAULT.decode(str, ReplicationStoreMeta.class);
 	}
 
 
@@ -94,7 +97,7 @@ public abstract class AbstractMetaStore implements MetaStore{
 	}
 
 	@Override
-	public final ReplicationStoreMeta dupReplicationStoreMeta() {
+	public ReplicationStoreMeta dupReplicationStoreMeta() {
 		return new ReplicationStoreMeta(metaRef.get());
 	}
 
@@ -154,11 +157,48 @@ public abstract class AbstractMetaStore implements MetaStore{
 	}
 
 	@Override
-	public ReplicationStoreMeta rdbUpdated(String rdbFile, EofType eofType, long rdbOffset) throws IOException {
+	public ReplicationStoreMeta checkReplIdAndUpdateRdbInfo(String rdbFile, RdbStore.Type type, EofType eofType,
+															long rdbOffset, String gtidSet, String expectedReplId) throws IOException {
+		synchronized (metaRef) {
+
+			ReplicationStoreMeta metaDup = dupReplicationStoreMeta();
+
+			if (!Objects.equals(expectedReplId, metaDup.getReplId())) {
+				throw new UnexpectedReplIdException(expectedReplId, metaDup.getReplId());
+			}
+
+			if (RdbStore.Type.NORMAL.equals(type)) {
+				logger.info("[rdbUpdated] update rdbLastOffset to {}", rdbOffset);
+				metaDup.setRdbFile(rdbFile);
+				setRdbFileInfo(metaDup, eofType);
+				metaDup.setRdbLastOffset(rdbOffset);
+				metaDup.setRdbGtidSet(gtidSet);
+			} else if (RdbStore.Type.RORDB.equals(type)) {
+				logger.info("[rordbUpdated] update rordbLastOffset to {}", rdbOffset);
+				metaDup.setRordbFile(rdbFile);
+				setRordbFileInfo(metaDup, eofType);
+				metaDup.setRordbLastOffset(rdbOffset);
+				metaDup.setRordbGtidSet(gtidSet);
+			} else {
+				throw new IllegalStateException("unknown type " + (type == null?"null":type.name()));
+			}
+
+			saveMeta(metaDup);
+
+			return metaDup;
+		}
+	}
+
+	@Override
+	public ReplicationStoreMeta checkReplIdAndUpdateRdbInfo(String rdbFile, EofType eofType, long rdbOffset, String expectedReplId) throws IOException {
 		
 		synchronized (metaRef) {
 			
 			ReplicationStoreMeta metaDup = dupReplicationStoreMeta();
+
+			if (!Objects.equals(expectedReplId, metaDup.getReplId())) {
+			    throw new UnexpectedReplIdException(expectedReplId, metaDup.getReplId());
+			}
 
 			metaDup.setRdbFile(rdbFile);
 			setRdbFileInfo(metaDup, eofType);
@@ -181,6 +221,19 @@ public abstract class AbstractMetaStore implements MetaStore{
 		}else{
 			metaDup.setRdbFileSize(Long.valueOf(tag));
 			metaDup.setRdbEofMark(null);
+		}
+	}
+
+	protected void setRordbFileInfo(ReplicationStoreMeta metaDup, EofType eofType) {
+
+		String tag = eofType.getTag();
+
+		if(tag.length() == RedisClientProtocol.RUN_ID_LENGTH){
+			metaDup.setRordbEofMark(tag);
+			metaDup.setRordbFileSize(-1);
+		}else{
+			metaDup.setRordbFileSize(Long.valueOf(tag));
+			metaDup.setRordbEofMark(null);
 		}
 	}
 

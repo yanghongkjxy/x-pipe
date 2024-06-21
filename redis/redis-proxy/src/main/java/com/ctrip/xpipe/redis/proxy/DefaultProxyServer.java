@@ -1,7 +1,7 @@
 package com.ctrip.xpipe.redis.proxy;
 
 import com.ctrip.xpipe.api.foundation.FoundationService;
-import com.ctrip.xpipe.redis.proxy.concurrent.FastThreadLocalThreadFactory;
+import com.ctrip.xpipe.utils.FastThreadLocalThreadFactory;
 import com.ctrip.xpipe.redis.proxy.config.ProxyConfig;
 import com.ctrip.xpipe.redis.proxy.handler.InternalNetworkHandler;
 import com.ctrip.xpipe.redis.proxy.handler.ProxyProtocolDecoder;
@@ -37,6 +37,8 @@ import java.net.InetSocketAddress;
 public class DefaultProxyServer implements ProxyServer {
 
     private Logger logger = LoggerFactory.getLogger(DefaultProxyServer.class);
+
+    private static LoggingHandler loggingHandler = new LoggingHandler(LogLevel.DEBUG);
 
     @Autowired
     private ResourceManager resourceManager;
@@ -85,7 +87,7 @@ public class DefaultProxyServer implements ProxyServer {
 
                 ChannelPipeline p = ch.pipeline();
                 p.addLast(new InternalNetworkHandler(config.getInternalNetworkPrefix()));
-                p.addLast(new LoggingHandler(LogLevel.DEBUG));
+                p.addLast(loggingHandler);
                 p.addLast(new ProxyProtocolDecoder(ProxyProtocolDecoder.DEFAULT_MAX_LENGTH));
                 p.addLast(new ProxyProtocolHandler(tunnelManager, resourceManager, pingStatsManager));
             }
@@ -111,7 +113,7 @@ public class DefaultProxyServer implements ProxyServer {
                 if(!config.noTlsNettyHandler()) {
                     p.addLast(resourceManager.getServerSslHandlerFactory().createSslHandler(ch));
                 }
-                p.addLast(new LoggingHandler(LogLevel.DEBUG));
+                p.addLast(loggingHandler);
                 p.addLast(new ProxyProtocolDecoder(ProxyProtocolDecoder.DEFAULT_MAX_LENGTH));
                 p.addLast(new ProxyProtocolHandler(tunnelManager, resourceManager, pingStatsManager));
             }
@@ -130,7 +132,7 @@ public class DefaultProxyServer implements ProxyServer {
                 .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                 .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new WriteBufferWaterMark(WRITE_LOW_WATER_MARK, WRITE_HIGH_WATER_MARK))
                 .childOption(ChannelOption.RCVBUF_ALLOCATOR, new FixedRecvByteBufAllocator(config.getFixedRecvBufferSize()))
-                .handler(new LoggingHandler(LogLevel.DEBUG));
+                .handler(loggingHandler);
         return bootstrap;
     }
 

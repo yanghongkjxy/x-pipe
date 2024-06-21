@@ -10,7 +10,7 @@ import com.ctrip.xpipe.redis.core.protocal.RedisProtocol;
 import com.ctrip.xpipe.redis.keeper.RedisClient;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer.PROMOTION_STATE;
-import com.ctrip.xpipe.redis.keeper.handler.PsyncHandler;
+import com.ctrip.xpipe.redis.keeper.handler.keeper.PsyncHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -93,7 +93,9 @@ public class RedisKeeperServerStateBackup extends AbstractRedisKeeperServerState
 		private String []args;
 		
 		private RedisClient redisClient;
-		
+
+		private volatile boolean released = false;
+
 		public PsyncKeeperServerStateObserver(String []args, RedisClient redisClient) {
 			
 			this.args = args;
@@ -104,32 +106,40 @@ public class RedisKeeperServerStateBackup extends AbstractRedisKeeperServerState
 		public void update(Object updateArgs, Observable observable) {
 			
 			logger.info("[update]{},{},{}", redisClient, updateArgs, observable);
-			
+
 			if(updateArgs instanceof KeeperServerStateChanged){
-				
-				try {
-					new PsyncHandler().handle(args, redisClient);
-				} catch (Exception e) {
-					logger.error("[update]" + updateArgs+ "," + observable + "," + redisClient, e);
-					try {
-						redisClient.close();
-					} catch (IOException e1) {
-						logger.error("[update][closeclient]" + redisClient, e);
+
+				redisClient.getRedisServer().processCommandSequentially(()-> {
+					if (released) {
+						logger.info("[update][{}] update but released", redisClient);
+						return;
 					}
-				}finally{
+
 					try {
-						release();
+						new PsyncHandler().handle(args, redisClient);
 					} catch (Exception e) {
-						logger.error("[update][release]" + updateArgs+ "," + observable + "," + redisClient, e);
+						logger.error("[update]" + updateArgs + "," + observable + "," + redisClient, e);
+						try {
+							redisClient.close();
+						} catch (IOException e1) {
+							logger.error("[update][closeclient]" + redisClient, e);
+						}
+					} finally {
+						try {
+							release();
+						} catch (Exception e) {
+							logger.error("[update][release]" + updateArgs + "," + observable + "," + redisClient, e);
+						}
 					}
-				}
+				});
 			}
 		}
 
 		@Override
 		public void release() throws Exception {
 			logger.info("[release]{}", this);
-			this.redisClient.getRedisKeeperServer().removeObserver(this);
+			released = true;
+			this.redisClient.getRedisServer().removeObserver(this);
 		}
 	}
 

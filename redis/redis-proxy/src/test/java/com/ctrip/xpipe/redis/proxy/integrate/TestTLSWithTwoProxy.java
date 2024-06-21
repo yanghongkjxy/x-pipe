@@ -14,6 +14,8 @@ import org.junit.*;
 import java.nio.charset.Charset;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -49,10 +51,11 @@ public class TestTLSWithTwoProxy extends AbstractProxyIntegrationTest {
         server2.stop();
         System.gc();
         System.gc();
+        Thread.sleep(2000);
     }
 
     @Test
-    public void testStability() throws TimeoutException, InterruptedException {
+    public void testStability() throws TimeoutException, InterruptedException, ExecutionException {
         int port = randomPort();
         String protocol = generateProxyProtocol(port);
         String message = randomString(10000);
@@ -89,13 +92,16 @@ public class TestTLSWithTwoProxy extends AbstractProxyIntegrationTest {
 
         ByteBuf expected = Unpooled.wrappedBuffer(message.getBytes());
 
-        Assert.assertEquals(0, ByteBufUtil.compare(expected, byteBufAtomicReference.get()));
-
+        waitConditionUntilTimeOut(() -> {
+            int rst = ByteBufUtil.compare(expected, byteBufAtomicReference.get());
+            logger.info("[testStability] cmp rst: {}", rst);
+            return 0 == rst;
+        }, 10000, 1000);
         expected.release();
     }
 
     @Test
-    public void testStabilityWithCompressAndSSL() throws TimeoutException, InterruptedException {
+    public void testStabilityWithCompressAndSSL() throws TimeoutException, InterruptedException, ExecutionException {
         ((TestProxyConfig)server1.getConfig()).setCompress(true);
         ((TestProxyConfig)server1.getResourceManager().getProxyConfig()).setCompress(true);
         testStability();
@@ -196,9 +202,9 @@ public class TestTLSWithTwoProxy extends AbstractProxyIntegrationTest {
 
         for(int i = 0; i < N; i++) {
             int finalI = i;
-            new Thread(new Runnable() {
+            new Thread(new AbstractExceptionLogTask() {
                 @Override
-                public void run() {
+                protected void doRun() throws Exception {
                     int index = 2;
                     String sendout = total[finalI].substring(0, index);
                     write(clientFuture[finalI], sendout);

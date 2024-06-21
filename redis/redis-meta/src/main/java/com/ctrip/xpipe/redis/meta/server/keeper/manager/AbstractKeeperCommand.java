@@ -39,13 +39,14 @@ public abstract class AbstractKeeperCommand<V> extends AbstractCommand<V>{
 	@Override
 	protected void doExecute() throws Exception {
 		
-		logger.info("[doExecute]{}", this);
+		getLogger().info("[doExecute]{}", this);
 		doOpetation();
 	}
 
 	@SuppressWarnings("unchecked")
 	private void doOpetation() {
 		try{
+			preKeeperContainerOperation();
 			doKeeperContainerOperation();
 			checkUntilStateOk();
 		}catch(KeeperContainerException e){
@@ -70,10 +71,10 @@ public abstract class AbstractKeeperCommand<V> extends AbstractCommand<V>{
 			public void operationComplete(CommandFuture<V> commandFuture) throws Exception {
 				
 				if(commandFuture.isSuccess()){
-					logger.info("[checkUntilStateOk][ok]{}", AbstractKeeperCommand.this);
+					getLogger().info("[checkUntilStateOk][ok]{}", AbstractKeeperCommand.this);
 					future().setSuccess(commandFuture.get());
 				}else{
-					logger.info("[checkUntilStateOk][fail]{}, {}", AbstractKeeperCommand.this, commandFuture.cause());
+					getLogger().info("[checkUntilStateOk][fail]{}, {}", AbstractKeeperCommand.this, commandFuture.cause());
 					future().setFailure(commandFuture.cause());
 				}
 			}
@@ -87,6 +88,8 @@ public abstract class AbstractKeeperCommand<V> extends AbstractCommand<V>{
 	protected abstract Command<V> createCheckStateCommand();
 
 	protected abstract boolean isSuccess(ErrorMessage<KeeperContainerErrorCode> error);
+
+	protected abstract void preKeeperContainerOperation();
 
 	protected abstract void doKeeperContainerOperation();
 	

@@ -1,8 +1,8 @@
 package com.ctrip.xpipe.redis.console.healthcheck.nonredis.migration;
 
-import com.ctrip.xpipe.redis.console.AbstractConsoleH2DbTest;
-import com.ctrip.xpipe.redis.console.alert.ALERT_TYPE;
-import com.ctrip.xpipe.redis.console.alert.AlertManager;
+import com.ctrip.xpipe.redis.console.AbstractConsoleDbTest;
+import com.ctrip.xpipe.redis.checker.alert.ALERT_TYPE;
+import com.ctrip.xpipe.redis.checker.alert.AlertManager;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
@@ -15,16 +15,13 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import java.util.Date;
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
 
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class MigrationSystemAvailableCheckTest extends AbstractConsoleH2DbTest {
+public class MigrationSystemAvailableCheckTest extends AbstractConsoleDbTest {
 
     @Mock
     private DcService dcService;
@@ -45,18 +42,18 @@ public class MigrationSystemAvailableCheckTest extends AbstractConsoleH2DbTest {
     public void beforeMigrationSystemAvailableCheckTest() {
         MockitoAnnotations.initMocks(this);
         when(consoleConfig.getClusterShardForMigrationSysCheck()).thenReturn(Pair.from("cluster1", "shard1"));
-        when(consoleConfig.getMetaservers()).thenReturn("{\"localmeta\": \"127.0.0.1:8080\"}");
+        when(consoleConfig.getMetaservers()).thenReturn(Collections.singletonMap("localmeta", "127.0.0.1:8080"));
     }
 
     @Test
     public void testInitBuilder() {
-        check.doCheck();
+        check.doAction();
         Assert.assertNotNull(check.getBuilder());
     }
 
     @Test
     public void testDoCheck() {
-        check.doCheck();
+        check.doAction();
         verify(dcService).findClusterRelatedDc(anyString());
         DefaultMigrationSystemAvailableChecker.MigrationSystemAvailability availability = check.getResult();
         Assert.assertFalse(availability.isAvaiable());
@@ -70,7 +67,7 @@ public class MigrationSystemAvailableCheckTest extends AbstractConsoleH2DbTest {
 
     @Test
     public void testGetIntervalMilli() {
-        Assert.assertEquals(3000, check.getIntervalMilli());
+        Assert.assertEquals(30000, check.getIntervalMilli());
     }
 
     @Test

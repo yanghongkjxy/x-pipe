@@ -4,6 +4,8 @@ import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.redis.core.protocal.protocal.RequestStringParser;
 import io.netty.buffer.ByteBuf;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -13,6 +15,8 @@ import java.util.concurrent.ScheduledExecutorService;
  *         May 9, 2016 5:42:01 PM
  */
 public class InfoCommand extends AbstractRedisCommand<String> {
+
+	private static final Logger logger = LoggerFactory.getLogger(InfoCommand.class);
 
 	private String args;
 	private InfoResultExtractor extractor;
@@ -24,6 +28,12 @@ public class InfoCommand extends AbstractRedisCommand<String> {
 
 	public InfoCommand(SimpleObjectPool<NettyClient> clientPool, INFO_TYPE infoType, ScheduledExecutorService scheduled) {
 		super(clientPool, scheduled);
+		this.args = infoType.cmd();
+	}
+
+	public InfoCommand(SimpleObjectPool<NettyClient> clientPool, INFO_TYPE infoType, ScheduledExecutorService scheduled,
+					   int commandTimeoutMilli) {
+		super(clientPool, scheduled, commandTimeoutMilli);
 		this.args = infoType.cmd();
 	}
 
@@ -56,18 +66,32 @@ public class InfoCommand extends AbstractRedisCommand<String> {
 		return getName() + " " + (args == null? "":args);
 	}
 
-
-
+	@Override
+	protected Logger getLogger() {
+		return logger;
+	}
 
 	public static enum INFO_TYPE{
-
+		ALL(""),
 		REPLICATION,
 		SERVER,
 		SENTINEL,
-		STATS;
+		STATS,
+		PERSISTENCE,
+		GTID;
+
+		private String cmd;
+
+		INFO_TYPE() {
+			this(null);
+		}
+
+		INFO_TYPE(String cmd) {
+			this.cmd = cmd;
+		}
 
 		public String cmd(){
-			return toString().toLowerCase();
+			return null == cmd ? toString().toLowerCase() : cmd;
 		}
 	}
 

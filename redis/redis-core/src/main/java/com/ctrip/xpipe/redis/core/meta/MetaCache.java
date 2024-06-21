@@ -1,0 +1,88 @@
+package com.ctrip.xpipe.redis.core.meta;
+
+import com.ctrip.xpipe.cluster.ClusterType;
+import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.core.entity.RedisMeta;
+import com.ctrip.xpipe.redis.core.entity.RouteMeta;
+import com.ctrip.xpipe.redis.core.entity.XpipeMeta;
+import com.ctrip.xpipe.redis.core.exception.MasterNotFoundException;
+import com.ctrip.xpipe.tuple.Pair;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * @author wenchao.meng
+ *         <p>
+ *         Mar 31, 2017
+ */
+public interface MetaCache {
+
+    XpipeMeta getXpipeMeta();
+
+    XpipeMeta getDividedXpipeMeta(int partIndex);
+
+    String getXmlFormatDividedXpipeMeta(int partIndex);
+
+    boolean inBackupDc(HostPort hostPort);
+
+    HostPort findMasterInSameShard(HostPort hostPort);
+
+    Set<HostPort> getAllKeepers();
+
+    String getDcByIpAndPeerClusterShard(String hostIp, Pair<String, String> peerClusterShard);
+
+    Map<String, String> getAllKeeperContainersDcMap();
+
+    Pair<String, String> findClusterShard(HostPort hostPort);
+
+    Map<String, String> getAllApplierContainersDcMap();
+
+    String getSentinelMonitorName(String clusterId, String shardId);
+
+    Set<HostPort> getActiveDcSentinels(String clusterId, String shardId);
+
+    HostPort findMaster(String clusterId, String shardId) throws MasterNotFoundException;
+
+    List<RedisMeta> getRedisOfDcClusterShard(String dc, String cluster, String shard);
+
+    List<RedisMeta> getSlavesOfDcClusterShard(String dc, String cluster, String shard);
+
+    List<RedisMeta> getSlavesOfShard(String cluster, String shard);
+
+    List<RedisMeta> getAllInstancesOfShard(String cluster, String shard);
+
+    String getDc(HostPort hostPort);
+
+    String getDcByIpAndClusterShard(String hostIp, Pair<String, String> clusterShard);
+
+    Pair<String, String> findClusterShardBySentinelMonitor(String monitor);
+
+    List<RouteMeta> getRoutes();
+
+    Map<String, RouteMeta> chooseDefaultRoutes(String clusterName, String srcDc, List<String> dstDcs, int orgId);
+
+    Map<String, RouteMeta> chooseRoutes(String clusterName, String srcDc, List<String> dstDcs, int orgId);
+
+    boolean isCrossRegion(String activeDc, String backupDc);
+
+    // get all redis from dc whose health status is visible to activeDc
+    List<HostPort> getAllActiveRedisOfDc(String activeDc, String dcId);
+
+    String getActiveDc(String clusterId, String shardId);
+
+    String getActiveDc(HostPort hostPort);
+
+    ClusterType getAzGroupType(HostPort hostPort);
+
+    long getLastUpdateTime();
+
+    ClusterType getClusterType(String clusterId);
+
+    boolean isMetaChain(HostPort src, HostPort dst);
+
+    Map<Long, String> dcShardIds(String clusterId, String dcId);
+
+    boolean isAsymmetricCluster(String clusterName);
+}

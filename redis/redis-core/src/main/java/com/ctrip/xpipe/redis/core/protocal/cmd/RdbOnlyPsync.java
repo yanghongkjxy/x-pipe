@@ -1,6 +1,3 @@
-/**
- * 
- */
 package com.ctrip.xpipe.redis.core.protocal.cmd;
 
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
@@ -29,6 +26,17 @@ public class RdbOnlyPsync extends AbstractReplicationStorePsync{
 	@Override
 	protected void doWhenFullSyncToNonFreshReplicationStore(String masterRunid) {
 		// always a fresh ReplicationStore, so do nothing
+	}
+
+	protected void failPsync(Throwable throwable) {
+		super.failPsync(throwable);
+		try {
+			getLogger().info("[failPsync][release rdb]");
+			currentReplicationStore.close();
+			currentReplicationStore.destroy();
+		} catch (Throwable th) {
+			getLogger().warn("[failPsync][release rdb] fail", th);
+		}
 	}
 
 }

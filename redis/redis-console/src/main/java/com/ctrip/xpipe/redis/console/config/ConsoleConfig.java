@@ -1,10 +1,15 @@
 package com.ctrip.xpipe.redis.console.config;
 
-import com.ctrip.xpipe.redis.console.healthcheck.actions.interaction.DcClusterDelayMarkDown;
+import com.ctrip.xpipe.redis.checker.alert.AlertConfig;
+import com.ctrip.xpipe.redis.checker.config.CheckerConfig;
+import com.ctrip.xpipe.redis.checker.healthcheck.actions.interaction.DcClusterDelayMarkDown;
+import com.ctrip.xpipe.redis.console.config.model.BeaconOrgRoute;
+import com.ctrip.xpipe.redis.console.util.HickwallMetricInfo;
 import com.ctrip.xpipe.redis.core.config.CoreConfig;
 import com.ctrip.xpipe.redis.core.meta.QuorumConfig;
 import com.ctrip.xpipe.tuple.Pair;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -13,23 +18,29 @@ import java.util.Set;
  *
  * Oct 19, 2016
  */
-public interface ConsoleConfig extends CoreConfig {
+public interface ConsoleConfig extends CoreConfig, CheckerConfig, AlertConfig {
+
+	String getServerMode();
 	
 	String getDatasource();
 	
 	int getConsoleNotifyRetryTimes();
 	
 	int getConsoleNotifyRetryInterval();
-	
-	String getMetaservers();
+
+	Map<String,String> getMetaservers();
 	
 	int getConsoleNotifyThreads();
 
 	Set<String> getConsoleUserAccessWhiteList();
 	
 	int getRedisReplicationHealthCheckInterval();
-	
-	String getHickwallAddress();
+
+	int getClusterHealthCheckInterval();
+
+	Map<String,String> getHickwallClusterMetricFormat();
+
+	HickwallMetricInfo getHickwallMetricInfo();
 
 	int getHealthyDelayMilli();
 
@@ -49,9 +60,9 @@ public interface ConsoleConfig extends CoreConfig {
 
 	int getRedisConfCheckIntervalMilli();
 
-	String getConsoleDomain();
+	int getSentinelCheckIntervalMilli();
 
-	Map<String, String> getConsoleCnameToDc();
+	String getConsoleDomain();
 
 	QuorumConfig  getDefaultSentinelQuorumConfig();
 
@@ -59,7 +70,7 @@ public interface ConsoleConfig extends CoreConfig {
 
 	String getXRedisMinimumRequestVersion();
 
-	String getXpipeRuntimeEnvironmentEnvironment();
+	String getXpipeRuntimeEnvironment();
 
 	String getDBAEmails();
 
@@ -77,7 +88,9 @@ public interface ConsoleConfig extends CoreConfig {
 
 	int getRebalanceSentinelMaxNumOnce();
 
-	int getNoAlarmMinutesForNewCluster();
+	int getNoAlarmMinutesForClusterUpdate();
+
+	int getHealthCheckSuspendMinutes();
 
 	Set<String> getIgnoredHealthCheckDc();
 
@@ -87,9 +100,91 @@ public interface ConsoleConfig extends CoreConfig {
 
 	int getPingDownAfterMilliThroughProxy();
 
-	void register(ConsoleConfigListener listener);
-
 	Map<String, String> getSocketStatsAnalyzingKeys();
 
 	Pair<String, String> getClusterShardForMigrationSysCheck();
+
+	int getProxyInfoCollectInterval();
+
+	int getOutterClientCheckInterval();
+
+	int getOuterClientSyncInterval();
+
+	String getOuterClientToken();
+
+	String filterOuterClusters();
+
+	Map<String, String> getConsoleDomains();
+
+	boolean isSentinelRateLimitOpen();
+
+	int getSentinelRateLimitSize();
+
+	Set<String> getVariablesCheckDataSources();
+
+	Set<String> getOwnClusterType();
+
+	Set<String> shouldNotifyClusterTypes();
+
+	String getCrossDcLeaderLeaseName();
+
+	boolean isSensitiveForRedundantRedis();
+
+	String getParallelConsoleDomain();
+
+	String getDefaultBeaconHost();
+
+	Map<Long, String> getBeaconHosts();
+
+	List<BeaconOrgRoute> getBeaconOrgRoutes();
+
+	int getClusterDividedParts();
+
+	int getCheckerAckTimeoutMilli();
+
+    long getMigrationTimeoutMilli();
+
+	long getServletMethodTimeoutMilli();
+	
+	boolean isRedisConfigCheckMonitorOpen();
+
+	String getRedisConfigCheckRules();
+
+	Set<String> getClustersSupportBiMigration();
+
+	String getBeaconSupportZone();
+
+	String getBiDirectionMigrationDcPriority();
+
+	String getChooseRouteStrategyType();
+
+	int monitorUnregisterProtectCount();
+
+	boolean isMigrationProcessReportOpen();
+
+	String getBreakDownDc();
+
+	String getKeyMigrationProcessReportUrl();
+
+    String getKeyMigrationResultReportUrl();
+
+    String getKeyMigrationResultReportToken();
+
+	boolean isMigrationResultReportOpen();
+
+	int getKeyMigrationResultReportRetryTimes();
+
+    long getMigrationProcessReportIntervalMill();
+
+	long getMigrationResultReportIntervalMill();
+
+	boolean isAutoMigrateOverloadKeeperContainerOpen();
+
+	long getAutoMigrateOverloadKeeperContainerIntervalMilli();
+
+	double getKeeperPairOverLoadFactor();
+
+	double getKeeperContainerDiskOverLoadFactor();
+
+	double getKeeperContainerIoRate();
 }

@@ -1,8 +1,11 @@
 package com.ctrip.xpipe.redis.console.controller.api.data;
 
+import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
-import com.ctrip.xpipe.redis.console.controller.api.RetMessage;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
+import com.ctrip.xpipe.redis.checker.model.DcClusterShard;
 import com.ctrip.xpipe.redis.console.model.RedisTbl;
+import com.ctrip.xpipe.redis.core.meta.MetaCache;
 import com.ctrip.xpipe.redis.console.service.RedisService;
 import com.ctrip.xpipe.redis.console.service.exception.ResourceNotFoundException;
 import com.ctrip.xpipe.tuple.Pair;
@@ -29,7 +32,10 @@ public class RedisUpdateController extends AbstractConsoleController{
     @Autowired
     private RedisService redisService;
 
-    @RequestMapping(value = "/redises/{dcId}/{clusterId}/{shardId}", method = RequestMethod.GET)
+    @Autowired
+    private MetaCache metaCache;
+
+    @RequestMapping(value = "/redises/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.GET)
     public List<String> getRedises(@PathVariable String dcId, @PathVariable String clusterId, @PathVariable String shardId) {
 
         logger.info("[getRedises]{},{},{}", dcId, clusterId, shardId);
@@ -51,7 +57,7 @@ public class RedisUpdateController extends AbstractConsoleController{
     }
 
 
-    @RequestMapping(value = "/redises/{dcId}/{clusterId}/{shardId}", method = RequestMethod.POST, consumes = MediaType.APPLICATION_JSON_UTF8_VALUE)
+    @RequestMapping(value = "/redises/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.POST, consumes = MediaType.APPLICATION_JSON_UTF8_VALUE)
     public RetMessage addRedises(@PathVariable String dcId, @PathVariable String clusterId, @PathVariable String shardId, @RequestBody List<String> redises) {
 
         logger.info("[addRedises]{},{},{}, {}", dcId, clusterId, shardId, redises);
@@ -68,7 +74,7 @@ public class RedisUpdateController extends AbstractConsoleController{
 
     }
 
-    @RequestMapping(value = "/redises/{dcId}/{clusterId}/{shardId}", method = RequestMethod.DELETE, consumes = MediaType.APPLICATION_JSON_UTF8_VALUE)
+    @RequestMapping(value = "/redises/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.DELETE, consumes = MediaType.APPLICATION_JSON_UTF8_VALUE)
     public RetMessage deleteRedises(@PathVariable String dcId, @PathVariable String clusterId, @PathVariable String shardId, @RequestBody List<String> redises) {
 
         logger.info("[deleteRedises]{},{},{}, {}", dcId, clusterId, shardId, redises);
@@ -82,6 +88,22 @@ public class RedisUpdateController extends AbstractConsoleController{
             logger.error("[deleteRedises]", e);
             return RetMessage.createFailMessage(e.getMessage());
         }
+    }
+
+    @RequestMapping(value = "/redis/info/" + IP_ADDRESS_VARIABLE + "/{port}")
+    public DcClusterShard getDcClusterShardByRedis(@PathVariable String ipAddress, @PathVariable int port) {
+        try {
+            HostPort hostPort = new HostPort(ipAddress, port);
+            Pair<String, String> clusterShard = metaCache.findClusterShard(hostPort);
+            String dcId = metaCache.getDc(hostPort);
+            if (clusterShard == null) {
+                return new DcClusterShard("", "", "");
+            }
+            return new DcClusterShard(dcId, clusterShard.getKey(), clusterShard.getValue());
+        } catch (Exception e) {
+            logger.error("[getClusterShardByRedis][{}:{}]", ipAddress, port, e);
+        }
+        return new DcClusterShard("", "", "");
     }
 
     private List<Pair<String,Integer>> getRedisAddresses(List<String> redises) {

@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.proxy.integrate;
 
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.redis.proxy.DefaultProxyServer;
 import com.ctrip.xpipe.redis.proxy.TestProxyConfig;
 import io.netty.buffer.ByteBuf;
@@ -8,6 +9,8 @@ import io.netty.buffer.UnpooledByteBufAllocator;
 import io.netty.channel.ChannelFuture;
 import org.junit.*;
 
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -43,7 +46,7 @@ public class TestTCPPacketWithTwoProxyServer extends AbstractProxyIntegrationTes
     }
 
     @Test
-    public void testStability() throws TimeoutException, InterruptedException {
+    public void testStability() throws TimeoutException, InterruptedException, ExecutionException {
         int port = randomPort();
         String protocol = generateProxyProtocol(port);
         String message = randomString(10 * 10000);
@@ -79,7 +82,12 @@ public class TestTCPPacketWithTwoProxyServer extends AbstractProxyIntegrationTes
 
         ByteBuf expected = UnpooledByteBufAllocator.DEFAULT.buffer().writeBytes(message.getBytes());
 
-        Assert.assertEquals(0, ByteBufUtil.compare(expected, byteBufAtomicReference.get()));
+        waitConditionUntilTimeOut(() -> {
+            int rst = ByteBufUtil.compare(expected, byteBufAtomicReference.get());
+            logger.info("[testStability] cmp rst: {}", rst);
+            return 0 == rst;
+        }, 10000, 1000);
+        expected.release();
     }
 
     @Ignore
@@ -112,9 +120,9 @@ public class TestTCPPacketWithTwoProxyServer extends AbstractProxyIntegrationTes
 
         for(int i = 0; i < N; i++) {
             int finalI = i;
-            new Thread(new Runnable() {
+            new Thread(new AbstractExceptionLogTask() {
                 @Override
-                public void run() {
+                protected void doRun() throws Exception {
                     int index = 3;
                     String sendout = total[finalI].substring(0, index);
                     write(clientFuture[finalI], sendout);

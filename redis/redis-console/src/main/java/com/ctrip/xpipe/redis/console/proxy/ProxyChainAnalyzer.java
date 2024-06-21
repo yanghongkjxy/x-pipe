@@ -1,26 +1,20 @@
 package com.ctrip.xpipe.redis.console.proxy;
 
-import com.ctrip.xpipe.api.cluster.CrossDcLeaderAware;
-import com.ctrip.xpipe.redis.console.model.DcClusterShard;
-import com.ctrip.xpipe.redis.console.proxy.impl.DefaultProxyChainAnalyzer;
+import com.ctrip.xpipe.redis.checker.model.DcClusterShardPeer;
+import com.ctrip.xpipe.redis.console.cluster.ConsoleLeaderAware;
 
-import java.util.List;
 import java.util.Map;
 
-public interface ProxyChainAnalyzer extends CrossDcLeaderAware {
+public interface ProxyChainAnalyzer extends ConsoleLeaderAware {
 
-    ProxyChain getProxyChain(String backupDcId, String clusterId, String shardId);
-
-    ProxyChain getProxyChain(String tunnelId);
-
-    List<ProxyChain> getProxyChains();
+    Map<DcClusterShardPeer, ProxyChain> getClusterShardChainMap();
 
     void addListener(Listener listener);
 
     void removeListener(Listener listener);
 
     interface Listener {
-        void onChange(Map<DcClusterShard, ProxyChain> previous, Map<DcClusterShard, ProxyChain> current);
+        void onChange(Map<DcClusterShardPeer, ProxyChain> previous, Map<DcClusterShardPeer, ProxyChain> current);
     }
 
 }

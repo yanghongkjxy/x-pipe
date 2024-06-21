@@ -2,11 +2,11 @@ package com.ctrip.xpipe.redis.core.proxy.monitor;
 
 import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.utils.DateTimeUtils;
-import org.apache.catalina.Host;
 
+import java.io.Serializable;
 import java.util.Objects;
 
-public class TunnelStatsResult {
+public class TunnelStatsResult implements Serializable {
 
     public static final long NOT_CLOSE = -1L;
 
@@ -25,6 +25,9 @@ public class TunnelStatsResult {
     private long closeTime;
 
     private String closeFrom;
+
+    public TunnelStatsResult() {
+    }
 
     public TunnelStatsResult(String tunnelId, String tunnelState, long protocolRecvTime, long protocolSndTime, HostPort frontend, HostPort backend) {
         this(tunnelId, tunnelState, frontend, backend, protocolRecvTime, protocolSndTime, NOT_CLOSE, null);
@@ -100,6 +103,46 @@ public class TunnelStatsResult {
         return backend;
     }
 
+    public TunnelStatsResult setTunnelId(String tunnelId) {
+        this.tunnelId = tunnelId;
+        return this;
+    }
+
+    public TunnelStatsResult setTunnelState(String tunnelState) {
+        this.tunnelState = tunnelState;
+        return this;
+    }
+
+    public TunnelStatsResult setFrontend(HostPort frontend) {
+        this.frontend = frontend;
+        return this;
+    }
+
+    public TunnelStatsResult setBackend(HostPort backend) {
+        this.backend = backend;
+        return this;
+    }
+
+    public TunnelStatsResult setProtocolRecvTime(long protocolRecvTime) {
+        this.protocolRecvTime = protocolRecvTime;
+        return this;
+    }
+
+    public TunnelStatsResult setProtocolSndTime(long protocolSndTime) {
+        this.protocolSndTime = protocolSndTime;
+        return this;
+    }
+
+    public TunnelStatsResult setCloseTime(long closeTime) {
+        this.closeTime = closeTime;
+        return this;
+    }
+
+    public TunnelStatsResult setCloseFrom(String closeFrom) {
+        this.closeFrom = closeFrom;
+        return this;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -117,6 +160,20 @@ public class TunnelStatsResult {
     public int hashCode() {
 
         return Objects.hash(tunnelId, tunnelState, protocolRecvTime, protocolSndTime, closeTime, closeFrom);
+    }
+
+    @Override
+    public TunnelStatsResult clone() {
+        TunnelStatsResult clone = new TunnelStatsResult();
+        clone.tunnelId = this.tunnelId;
+        clone.tunnelState = this.tunnelState;
+        clone.protocolRecvTime = this.protocolRecvTime;
+        clone.protocolSndTime = this.protocolSndTime;
+        clone.closeFrom = this.closeFrom;
+        clone.closeTime = this.closeTime;
+        if (null != this.frontend) clone.frontend = new HostPort(this.frontend.getHost(), this.frontend.getPort());
+        if (null != this.backend) clone.backend = new HostPort(this.backend.getHost(), this.backend.getPort());
+        return clone;
     }
 
     @Override

@@ -1,7 +1,8 @@
 package com.ctrip.xpipe.redis.console.controller.api.data.meta;
 
 import com.ctrip.xpipe.utils.IpUtils;
-import jline.internal.Nullable;
+import com.ctrip.xpipe.utils.StringUtil;
+import org.springframework.lang.Nullable;
 
 /**
  * @author chen.zhu
@@ -22,6 +23,11 @@ public class KeeperContainerCreateInfo extends AbstractCreateInfo {
     private String orgName;
 
     private boolean active;
+
+    private String azName;
+
+    private String diskType;
+
 
     public boolean isActive() {
         return active;
@@ -78,6 +84,15 @@ public class KeeperContainerCreateInfo extends AbstractCreateInfo {
         return this;
     }
 
+    public String getAzName() {
+        return azName;
+    }
+
+    public KeeperContainerCreateInfo setAzName(String azName) {
+        this.azName = azName;
+        return this;
+    }
+
     @Override
     public String toString() {
         return "KeeperContainerCreateInfo{" +
@@ -87,6 +102,8 @@ public class KeeperContainerCreateInfo extends AbstractCreateInfo {
                 ", keepercontainerOrgId=" + keepercontainerOrgId +
                 ", orgName='" + orgName + '\'' +
                 ", active=" + active +
+                ", azName='" + azName + '\'' +
+                ", diskType='" + diskType + '\'' +
                 '}';
     }
 
@@ -96,6 +113,15 @@ public class KeeperContainerCreateInfo extends AbstractCreateInfo {
 
     public KeeperContainerCreateInfo setOrgName(String orgName) {
         this.orgName = orgName;
+        return this;
+    }
+
+    public String getDiskType() {
+        return diskType;
+    }
+
+    public KeeperContainerCreateInfo setDiskType(String diskType) {
+        this.diskType = diskType;
         return this;
     }
 }

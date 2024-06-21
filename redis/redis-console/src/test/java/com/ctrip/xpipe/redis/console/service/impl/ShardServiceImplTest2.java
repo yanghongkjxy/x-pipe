@@ -1,7 +1,13 @@
 package com.ctrip.xpipe.redis.console.service.impl;
 
+import com.ctrip.xpipe.cluster.ClusterType;
+import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
 import com.ctrip.xpipe.redis.console.dao.ShardDao;
+import com.ctrip.xpipe.redis.console.model.ClusterTbl;
+import com.ctrip.xpipe.redis.console.model.DcClusterTbl;
 import com.ctrip.xpipe.redis.console.model.ShardTbl;
+import com.ctrip.xpipe.redis.console.service.ClusterService;
+import com.ctrip.xpipe.redis.console.service.DcClusterShardService;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
@@ -11,8 +17,12 @@ import org.junit.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.unidal.dal.jdbc.DalException;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 
@@ -25,6 +35,15 @@ public class ShardServiceImplTest2 {
 
     @Mock
     private ShardDao shardDao;
+
+    @Mock
+    private ClusterService clusterService;
+
+    @Mock
+    private DcClusterShardService dcClusterShardService;
+
+    @Mock
+    private ConsoleConfig consoleConfig;
 
     @InjectMocks
     private ShardServiceImpl shardService = new ShardServiceImpl();
@@ -45,11 +64,16 @@ public class ShardServiceImplTest2 {
 
         when(shardDao.queryAllShardsByClusterName(anyString())).thenReturn(null);
         when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1"));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
 
-        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
+//        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
 
-        Assert.assertEquals(cluster + "-" + proto.getShardName(), shardTbl.getSetinelMonitorName());
+        try {
+            ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, anyList(), Maps.newHashMap());
+            Assert.fail();
+        } catch (IllegalStateException e) {
+            Assert.assertEquals("monitor name shard1 already exist", e.getMessage());
+        }
     }
 
     // monitor name not exist
@@ -60,32 +84,11 @@ public class ShardServiceImplTest2 {
 
         when(shardDao.queryAllShardsByClusterName(anyString())).thenReturn(null);
         when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1"));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
 
-        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
+        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, anyList(), Maps.newHashMap());
 
         Assert.assertEquals(proto.getShardName(), shardTbl.getSetinelMonitorName());
-    }
-
-
-    // monitor name exist both for shard and cluster-shard
-    @Test(expected = java.lang.IllegalStateException.class)
-    public void findOrCreateShardIfNotExist3() throws Exception {
-        ShardTbl proto = new ShardTbl().setShardName("shard1");
-        String cluster = "cluster-test";
-
-        when(shardDao.queryAllShardsByClusterName(anyString())).thenReturn(null);
-        when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1",
-                cluster + "-" + proto.getShardName()));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
-
-        try {
-            ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
-        } catch (IllegalStateException e) {
-            Assert.assertEquals(String.format("Both %s and %s is assigned as sentinel monitor name",
-                    proto.getShardName(), cluster + "-" + proto.getShardName()), e.getMessage());
-            throw e;
-        }
     }
 
     // shard exist
@@ -99,9 +102,9 @@ public class ShardServiceImplTest2 {
         when(shardDao.queryAllShardsByClusterName(cluster)).thenReturn(Lists.newArrayList(expected));
         when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1",
                 cluster + "-" + proto.getShardName()));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
 
-        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
+        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, anyList(), Maps.newHashMap());
 
         Assert.assertTrue(expected == shardTbl);
     }
@@ -121,9 +124,9 @@ public class ShardServiceImplTest2 {
         when(shardDao.queryAllShardsByClusterName(cluster)).thenReturn(Lists.newArrayList(expected));
         when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1",
                 cluster + "-" + proto.getShardName()));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
 
-        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
+        ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, anyList(), Maps.newHashMap());
 
         Assert.assertTrue(expected == shardTbl);
     }
@@ -140,10 +143,10 @@ public class ShardServiceImplTest2 {
         when(shardDao.queryAllShardsByClusterName(cluster)).thenReturn(Lists.newArrayList(expected));
         when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1",
                 cluster + "-" + proto.getShardName()));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
 
         try {
-            ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
+            ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, anyList(), Maps.newHashMap());
         } catch (Exception e) {
             Assert.assertEquals(String.format("Post shard monitor name %s diff from previous %s",
                     shard, cluster + "-shard1"), e.getMessage());
@@ -160,13 +163,29 @@ public class ShardServiceImplTest2 {
         when(shardDao.queryAllShardsByClusterName(cluster)).thenReturn(Lists.newArrayList());
         when(shardDao.queryAllShardMonitorNames()).thenReturn(Sets.newHashSet("shard1",
                 cluster + "-" + proto.getShardName()));
-        when(shardDao.insertShard(cluster, proto, Maps.newHashMap())).thenReturn(proto);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
 
         try {
-            ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, Maps.newHashMap());
+            ShardTbl shardTbl = shardService.findOrCreateShardIfNotExist(cluster, proto, anyList(), Maps.newHashMap());
         } catch (Exception e) {
             Assert.assertEquals(String.format("Shard monitor name %s already exist", shard), e.getMessage());
             throw e;
         }
+    }
+
+    @Test
+    public void findOrCreateSHardIfNotExistWithCreateDcClusterShard() throws DalException {
+        String cluster = "cluster-test", shard = "shard1";
+        // TODO: 2022/10/10 remove hetero
+//        ClusterTbl clusterTbl = new ClusterTbl().setClusterName(cluster).setClusterType(ClusterType.HETERO.toString());
+        ClusterTbl clusterTbl = new ClusterTbl().setClusterName(cluster).setClusterType(ClusterType.ONE_WAY.toString());
+        ShardTbl proto = new ShardTbl().setShardName(shard).setSetinelMonitorName(shard);
+
+        when(clusterService.find(cluster)).thenReturn(clusterTbl);
+        when(consoleConfig.supportSentinelHealthCheck(any(), anyString())).thenReturn(true);
+        when(shardDao.insertShard(cluster, proto)).thenReturn(proto);
+
+        shardService.findOrCreateShardIfNotExist(cluster, proto, Lists.newArrayList(new DcClusterTbl()), Maps.newHashMap());
+        verify(dcClusterShardService).insertBatch(anyList());
     }
 }

@@ -5,6 +5,7 @@ import com.ctrip.xpipe.api.lifecycle.Destroyable;
 import com.ctrip.xpipe.redis.core.entity.KeeperInstanceMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.protocal.PsyncObserver;
+import com.ctrip.xpipe.redis.core.store.ReplId;
 import com.ctrip.xpipe.redis.core.store.ReplicationStore;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.exception.RedisSlavePromotionException;
@@ -25,10 +26,8 @@ public interface RedisKeeperServer extends RedisServer, PsyncObserver, Destroyab
 	int getListeningPort();
 	
 	KeeperRepl getKeeperRepl();
-	
-	RedisClient clientConnected(Channel channel);
-	
-	void clientDisConnected(Channel channel);
+
+	void clientDisconnected(Channel channel);
 	
 	String getKeeperRunid();
 	
@@ -41,11 +40,9 @@ public interface RedisKeeperServer extends RedisServer, PsyncObserver, Destroyab
 	Set<RedisSlave> slaves();
 		
 	ReplicationStore getReplicationStore();
-		
-	String getClusterId();
-	
-	String getShardId();
-	
+
+	ReplId getReplId();
+
 	boolean compareAndDo(RedisKeeperServerState expected, Runnable action);
 	
 	void setRedisKeeperServerState(RedisKeeperServerState redisKeeperServerState);
@@ -61,6 +58,8 @@ public interface RedisKeeperServer extends RedisServer, PsyncObserver, Destroyab
 	RedisMaster getRedisMaster();
 	
 	void promoteSlave(String ip, int port) throws RedisSlavePromotionException;
+
+	void closeSlaves(String reason);
 	
 	public static enum PROMOTION_STATE{
 		
@@ -72,6 +71,10 @@ public interface RedisKeeperServer extends RedisServer, PsyncObserver, Destroyab
 	}
 
 	void fullSyncToSlave(RedisSlave redisSlave) throws IOException;
+
+	void startIndexing() throws IOException;
+
+	boolean isStartIndexing();
 	
 	KeeperInstanceMeta getKeeperInstanceMeta();
 	
@@ -87,5 +90,14 @@ public interface RedisKeeperServer extends RedisServer, PsyncObserver, Destroyab
 	
 	KeeperMonitor getKeeperMonitor();
 
-	void processCommandSequentially(Runnable runnable);
+	void resetDefaultReplication();
+
+	PsyncObserver createPsyncObserverForRdbOnlyRepl();
+
+	void resetElection();
+
+	boolean isLeader();
+
+	long getLastElectionResetTime();
+
 }

@@ -7,6 +7,7 @@ import com.ctrip.xpipe.netty.filechannel.ReferenceFileRegion;
 import com.ctrip.xpipe.observer.NodeAdded;
 import com.ctrip.xpipe.payload.ByteArrayWritableByteChannel;
 import com.ctrip.xpipe.redis.core.AbstractRedisTest;
+import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
 import com.ctrip.xpipe.redis.core.redis.RunidGenerator;
 import com.ctrip.xpipe.redis.core.store.*;
@@ -18,7 +19,9 @@ import com.ctrip.xpipe.redis.keeper.monitor.impl.NoneKeepersMonitorManager;
 import com.ctrip.xpipe.redis.keeper.monitor.impl.NoneKeepersMonitorManager.NoneKeeperMonitor;
 import com.ctrip.xpipe.redis.keeper.store.DefaultReplicationStore;
 import com.ctrip.xpipe.redis.keeper.store.DefaultReplicationStoreManager;
+import com.ctrip.xpipe.redis.core.store.OffsetReplicationProgress;
 import io.netty.channel.ChannelFuture;
+import org.junit.BeforeClass;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -33,27 +36,43 @@ import java.util.concurrent.TimeUnit;
  */
 public class AbstractRedisKeeperTest extends AbstractRedisTest {
 
-	protected String getClusterId() {
-		return currentTestName() + "-clusterId";
+	@BeforeClass
+	public static void beforeAbstractCheckerTest(){
+		System.setProperty("DisableLoadProxyAgentJar", "true");
 	}
 
-	protected String getShardId() {
+	protected ClusterId getClusterId() {
+		return new ClusterId(currentTestName()  + "-", 0L);
+	}
 
-		return currentTestName() + "-shardId";
+	protected ClusterId getClusterId(Long id) {
+		return new ClusterId(currentTestName()  + "-", id);
+	}
+
+	protected ReplId getReplId() {
+		return new ReplId(currentTestName() + "-", 0L);
+	}
+
+	protected ShardId getShardId() {
+	    return new ShardId(currentTestName() + "-", 0L);
+	}
+
+	protected ShardId getShardId(Long id) {
+		return new ShardId(currentTestName() + "-", id);
 	}
 
 	protected ReplicationStoreManager createReplicationStoreManager(String keeperRunid, KeeperConfig keeperConfig) {
 		
 		String tmpDir = getTestFileDir();
 
-		return createReplicationStoreManager(getClusterId(), getShardId(), keeperRunid, keeperConfig, new File(tmpDir));
+		return createReplicationStoreManager(getReplId(), keeperRunid, keeperConfig, new File(tmpDir));
 	}
 
 	protected ReplicationStoreManager createReplicationStoreManager(KeeperConfig keeperConfig) {
 		
 		String tmpDir = getTestFileDir();
 
-		return createReplicationStoreManager(getClusterId(), getShardId(), keeperConfig, new File(tmpDir));
+		return createReplicationStoreManager(getReplId(), keeperConfig, new File(tmpDir));
 	}
 
 	
@@ -61,32 +80,31 @@ public class AbstractRedisKeeperTest extends AbstractRedisTest {
 
 		String tmpDir = getTestFileDir();
 
-		return createReplicationStoreManager(getClusterId(), getShardId(), new File(tmpDir));
+		return createReplicationStoreManager(getReplId(), new File(tmpDir));
 	}
 
-	protected ReplicationStoreManager createReplicationStoreManager(String clusterId, String shardId, String keeperRunid, File storeDir) {
+	protected ReplicationStoreManager createReplicationStoreManager(ReplId replId, String keeperRunid, File storeDir) {
 
-		return createReplicationStoreManager(clusterId, shardId, keeperRunid, getKeeperConfig(), storeDir);
+		return createReplicationStoreManager(replId, keeperRunid, getKeeperConfig(), storeDir);
 	}
 
-	protected ReplicationStoreManager createReplicationStoreManager(String clusterId, String shardId, File storeDir) {
+	protected ReplicationStoreManager createReplicationStoreManager(ReplId replId, File storeDir) {
 
-		return createReplicationStoreManager(clusterId, shardId, getKeeperConfig(), storeDir);
+		return createReplicationStoreManager(replId, getKeeperConfig(), storeDir);
 	}
 	
 	protected KeeperConfig getKeeperConfig() {
 		return new TestKeeperConfig();
 	}
 
-	protected ReplicationStoreManager createReplicationStoreManager(String clusterId, String shardId, KeeperConfig keeperConfig, File storeDir) {
+	protected ReplicationStoreManager createReplicationStoreManager(ReplId replId, KeeperConfig keeperConfig, File storeDir) {
 		
-		return createReplicationStoreManager(clusterId, shardId, randomKeeperRunid(), keeperConfig, storeDir);
+		return createReplicationStoreManager(replId, randomKeeperRunid(), keeperConfig, storeDir);
 	}
 
-	protected ReplicationStoreManager createReplicationStoreManager(String clusterId, String shardId, String keeperRunid, KeeperConfig keeperConfig, File storeDir) {
+	protected ReplicationStoreManager createReplicationStoreManager(ReplId replId, String keeperRunid, KeeperConfig keeperConfig, File storeDir) {
 		
-		DefaultReplicationStoreManager replicationStoreManager = new DefaultReplicationStoreManager(keeperConfig, clusterId, shardId, keeperRunid, storeDir, 
-				createkeeperMonitor());
+		DefaultReplicationStoreManager replicationStoreManager = new DefaultReplicationStoreManager(keeperConfig, replId, keeperRunid, storeDir, createkeeperMonitor());
 		
 		replicationStoreManager.addObserver(new Observer() {
 			
@@ -121,21 +139,21 @@ public class AbstractRedisKeeperTest extends AbstractRedisTest {
 	}
 	
 
-	protected File getReplicationStoreManagerBaseDir() {
+	protected File getReplicationStoreManagerBaseDir(KeeperMeta keeper) {
 
 		String tmpDir = getTestFileDir();
-		return new File(tmpDir);
+		return new File(String.format("%s/%s", tmpDir, keeper.getPort()));
 	}
 
 	
-	protected String readRdbFileTilEnd(ReplicationStore replicationStore) throws IOException, InterruptedException {
+	protected byte[] readRdbFileTilEnd(ReplicationStore replicationStore) throws IOException, InterruptedException {
 
 		RdbStore rdbStore = ((DefaultReplicationStore)replicationStore).getRdbStore();
 		
 		return readRdbFileTilEnd(rdbStore);
 	}
 
-	protected String readRdbFileTilEnd(RdbStore rdbStore) throws IOException, InterruptedException {
+	protected byte[] readRdbFileTilEnd(RdbStore rdbStore) throws IOException, InterruptedException {
 
 		final ByteArrayWritableByteChannel bachannel = new ByteArrayWritableByteChannel();
 		final CountDownLatch latch = new CountDownLatch(1);
@@ -144,8 +162,13 @@ public class AbstractRedisKeeperTest extends AbstractRedisTest {
 		rdbStore.readRdbFile(new RdbFileListener() {
 
 			@Override
-			public void setRdbFileInfo(EofType eofType, long rdbFileOffset) {
+			public void setRdbFileInfo(EofType eofType, ReplicationProgress<?> rdbProgress) {
 
+			}
+
+			@Override
+			public boolean supportProgress(Class<? extends ReplicationProgress<?>> clazz) {
+				return true;
 			}
 
 			@Override
@@ -172,7 +195,7 @@ public class AbstractRedisKeeperTest extends AbstractRedisTest {
 			}
 		});
 		latch.await(5, TimeUnit.SECONDS);
-		return new String(bachannel.getResult());
+		return bachannel.getResult();
 	}
 
 	public String readCommandFileTilEnd(final ReplicationStore replicationStore, int expectedLen) throws IOException {
@@ -195,7 +218,7 @@ public class AbstractRedisKeeperTest extends AbstractRedisTest {
 			}
 			
 			private void doRun() throws IOException{
-				replicationStore.addCommandsListener(replicationStore.beginOffsetWhenCreated() + beginOffset, new CommandsListener() {
+				replicationStore.addCommandsListener(new OffsetReplicationProgress(replicationStore.beginOffsetWhenCreated() + beginOffset), new CommandsListener() {
 					
 					@Override
 					public boolean isOpen() {
@@ -207,13 +230,18 @@ public class AbstractRedisKeeperTest extends AbstractRedisTest {
 					}
 
 					@Override
-					public ChannelFuture onCommand(ReferenceFileRegion referenceFileRegion) {
+					public Long processedOffset() {
+						return null;
+					}
+
+					@Override
+					public ChannelFuture onCommand(CommandFile currentFile, long filePosition, Object cmd) {
 						
 						try {
-							byte [] message = readFileChannelInfoMessageAsBytes(referenceFileRegion);
+							byte [] message = readFileChannelInfoMessageAsBytes((ReferenceFileRegion) cmd);
 							baous.write(message);
 						} catch (IOException e) {
-							logger.error("[onCommand]" + referenceFileRegion, e);
+							logger.error("[onCommand]" + cmd, e);
 						}
 						return null;
 					}

@@ -2,19 +2,27 @@ package com.ctrip.xpipe.redis.core.meta.comparator;
 
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.DcMeta;
+import com.ctrip.xpipe.redis.core.entity.ShardMeta;
+import com.google.common.collect.Maps;
 import org.unidal.tuple.Triple;
 
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * @author wenchao.meng
  *
  * Sep 2, 2016
  */
-public class DcMetaComparator extends AbstractMetaComparator<ClusterMeta, DcChange>{
-	
+public class DcMetaComparator extends AbstractMetaComparator<ClusterMeta>{
+
 	private DcMeta current, future;
-	
+
+	private Map<Long, ShardMeta> currentShards;
+	private Map<Long, ShardMeta> futureShards;
+	private AtomicBoolean shardMigrateSupport = new AtomicBoolean(false);
 	
 	public static DcMetaComparator  buildComparator(DcMeta current, DcMeta future){
 		
@@ -43,36 +51,66 @@ public class DcMetaComparator extends AbstractMetaComparator<ClusterMeta, DcChan
 		return dcMetaComparator;
 	}
 
-	private DcMetaComparator(){
-		
+	public DcMetaComparator() {
 	}
-	
-	public DcMetaComparator(DcMeta current, DcMeta future){
+
+	public DcMetaComparator(DcMeta current, DcMeta future) {
 		this.current = current;
 		this.future = future;
 	}
-	
+
+	public void setShardMigrateSupport() {
+		if (shardMigrateSupport.compareAndSet(false, true)) {
+			this.currentShards = extractShardsInDc(current);
+			this.futureShards = extractShardsInDc(future);
+		}
+	}
+
+	public boolean supportShardMigrate() {
+		return shardMigrateSupport.get();
+	}
+
+	private Map<Long, ShardMeta> extractShardsInDc(DcMeta dcMeta) {
+		Map<Long, ShardMeta> shards = Maps.newHashMap();
+		dcMeta.getClusters().values().forEach(cluster -> {
+			cluster.getShards().values().forEach(shard -> {
+				shards.put(shard.getDbId(), shard);
+			});
+		});
+
+		return shards;
+	}
+
+	private Map<Long, ClusterMeta> extractClustersInDc(DcMeta dcMeta) {
+		return dcMeta.getClusters().values().stream()
+				.collect(Collectors.toMap(ClusterMeta::getDbId, clusterMeta -> clusterMeta));
+	}
+
 	public void compare(){
+		Map<Long, ClusterMeta> currentClustersMap = extractClustersInDc(current);
+		Map<Long, ClusterMeta> futureClustersMap = extractClustersInDc(future);
+		Triple<Set<Long>, Set<Long>, Set<Long>> result = getDiff(currentClustersMap.keySet(), futureClustersMap.keySet());
+
+		Set<Long> addedClusterDbIds = result.getFirst();
+		Set<Long> intersectionClusterDbIds = result.getMiddle();
+		Set<Long> deletedClusterDbIds = result.getLast();
 		
-		Triple<Set<String>, Set<String>, Set<String>> result = getDiff(current.getClusters().keySet(), future.getClusters().keySet());
-		
-		Set<String> addedClusterIds = result.getFirst(); 
-		Set<String> intersectionClusterIds = result.getMiddle();
-		Set<String> deletedClusterIds = result.getLast();
-		
-		for(String clusterId : addedClusterIds){
-			added.add(future.findCluster(clusterId));
+		for(Long clusterDbId : addedClusterDbIds){
+			added.add(futureClustersMap.get(clusterDbId));
 		}
 		
-		for(String clusterId : deletedClusterIds){
-			removed.add(current.findCluster(clusterId));
+		for(Long clusterDbId : deletedClusterDbIds){
+			removed.add(currentClustersMap.get(clusterDbId));
 		}
 		
-		for(String clusterId : intersectionClusterIds){
-			ClusterMeta currentMeta = current.findCluster(clusterId);
-			ClusterMeta futureMeta = future.findCluster(clusterId);
-			if(!reflectionEquals(currentMeta, futureMeta)){
+		for(Long clusterDbId : intersectionClusterDbIds){
+			ClusterMeta currentMeta = currentClustersMap.get(clusterDbId);
+			ClusterMeta futureMeta = futureClustersMap.get(clusterDbId);
+			if(!reflectionEquals(currentMeta, futureMeta)) {
 				ClusterMetaComparator clusterMetaComparator = new ClusterMetaComparator(currentMeta, futureMeta);
+				if (supportShardMigrate()) {
+					clusterMetaComparator.setShardMigrateSupport(currentShards, futureShards);
+				}
 				clusterMetaComparator.compare();
 				modified.add(clusterMetaComparator);
 			}

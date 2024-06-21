@@ -1,14 +1,10 @@
 x-pipe
 ================
 
-### [master]
-[![Build Status](https://travis-ci.org/ctripcorp/x-pipe.svg?branch=master)](https://travis-ci.org/ctripcorp/x-pipe)
-[![Coverage Status](https://coveralls.io/repos/github/ctripcorp/x-pipe/badge.svg?branch=master)](https://coveralls.io/github/ctripcorp/x-pipe?branch=master)
+[![Build Status](https://travis-ci.com/ctripcorp/x-pipe.svg?branch=master)](https://travis-ci.com/ctripcorp/x-pipe)
 [![Coverity Scan Build Status](https://scan.coverity.com/projects/8884/badge.svg)](https://scan.coverity.com/projects/ctripcorp-x-pipe)
-
-### [dev]
-[![Build Status](https://travis-ci.org/ctripcorp/x-pipe.svg?branch=dev)](https://travis-ci.org/ctripcorp/x-pipe)
-[![Coverage Status](https://coveralls.io/repos/github/ctripcorp/x-pipe/badge.svg?branch=dev)](https://coveralls.io/github/ctripcorp/x-pipe?branch=dev)
+[![github CI](https://github.com/ctripcorp/x-pipe/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/ctripcorp/x-pipe/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/ctripcorp/x-pipe/branch/master/graph/badge.svg?token=wj3MUNTPcF)](https://codecov.io/gh/ctripcorp/x-pipe)
 
 <!-- MarkdownTOC -->
 
@@ -23,16 +19,19 @@ x-pipe
         - [Redis 自身高可用](#redis-自身高可用)
     - [测试数据](#测试数据)
         - [延时测试](#延时测试)
+    - [跨公网部署及架构](#跨公网部署及架构)
+- [docker快速启动](#docker快速启动)
 - [深入了解](#深入了解)
 - [技术交流](#技术交流)
 - [License](#license)
 
 <!-- /MarkdownTOC -->
 
+See the [English](https://github.com/ctripcorp/x-pipe/blob/master/README-en.md) readme here.
 
 <a name="xpipe-解决什么问题"></a>
 # XPipe 解决什么问题
-Redis 在携程内部得到了广泛的使用，根据客户端数据统计，整个携程全部 Redis 的读写请求在每秒 200W，其中写请求约 10W，很多业务甚至会将 Redis 当成内存数据库使用。这样，就对 Redis 多数据中心提出了很大的需求，一是为了提升可用性，解决数据中心 DR(Disaster Recovery) 问题，二是提升访问性能，每个数据中心可以读取当前数据中心的数据，无需跨机房读数据，在这样的需求下，XPipe 应运而生 。  
+Redis 在携程内部得到了广泛的使用，根据客户端数据统计，整个携程全部 Redis 的读写请求在每秒 2000W，其中写请求约 100W，很多业务甚至会将 Redis 当成持久化的内存数据库使用。这样，就对 Redis 多数据中心提出了很大的需求，一是为了提升可用性，解决数据中心 DR(Disaster Recovery) 问题，二是提升访问性能，每个数据中心可以读取当前数据中心的数据，无需跨机房读数据，在这样的需求下，XPipe 应运而生 。  
 
 为了方便描述，后面用 DC 代表数据中心 (Data Center)。
 
@@ -102,16 +101,25 @@ Redis 也可能会挂，Redis 本身提供哨兵 (Sentinel) 机制保证集群�
 
 在携程生产环境进行了测试，生产环境两个机房之间的 ping RTT 约为 0.61ms，经过跨数据中心的两层 keeper 后，测试得到的平均延时约为 0.8ms，延时 99.9 线为 2ms。
 
+<a name="跨公网部署及架构"></a>
+## 跨公网部署及架构
+[详情参考 -- 跨公网部署及架构](https://github.com/ctripcorp/x-pipe/blob/master/doc/proxy.md)
+
+<a name="docker快速启动"></a>
+# docker快速启动
+[详情参考 -- docker quick start](https://github.com/ctripcorp/x-pipe/wiki/QuickStart#docker-start)
+
 <a name="深入了解"></a>
 # 深入了解
 - 【有任何疑问，请阅读】[XPipe Wiki](https://github.com/ctripcorp/x-pipe/wiki) 
+- 【目前用户的问题整理】[XPipe Q&A](https://github.com/ctripcorp/x-pipe/wiki/XPipe-Q&A)
 - 【文章】[携程Redis多数据中心解决方案-XPipe](https://mp.weixin.qq.com/s/Q3bt0-5nv8uNMdHuls-Exw?)
 - 【文章】[携程Redis海外机房数据同步实践](https://mp.weixin.qq.com/s/LeSSdT6bOEFzZyN26PRVzg)
+- 【PPT】[携程内XPipe使用介绍](https://docs.c-ctrip.com/files/6/portal/0AS2w12000947w1mw6A59.pptx)
 
 <a name="技术交流"></a>
 # 技术交流
 ![tech-support-qq](https://raw.github.com/ctripcorp/x-pipe/master/doc/xpipe_qq.png)
-
 
 <a name="license"></a>
 # License

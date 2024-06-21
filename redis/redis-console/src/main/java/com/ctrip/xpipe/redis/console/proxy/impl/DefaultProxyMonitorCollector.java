@@ -11,10 +11,9 @@ import com.ctrip.xpipe.command.SequenceCommandChain;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.lifecycle.AbstractStartStoppable;
 import com.ctrip.xpipe.netty.commands.NettyClient;
-import com.ctrip.xpipe.redis.console.healthcheck.crossdc.SafeLoop;
+import com.ctrip.xpipe.redis.checker.healthcheck.leader.SafeLoop;
 import com.ctrip.xpipe.redis.console.model.ProxyModel;
 import com.ctrip.xpipe.redis.console.proxy.ProxyMonitorCollector;
-import com.ctrip.xpipe.redis.console.proxy.TunnelInfo;
 import com.ctrip.xpipe.redis.core.proxy.command.AbstractProxyMonitorCommand;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpoint;
 import com.ctrip.xpipe.redis.core.proxy.monitor.PingStatsResult;
@@ -24,15 +23,21 @@ import com.ctrip.xpipe.redis.core.proxy.monitor.TunnelTrafficResult;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntSupplier;
 
 public class DefaultProxyMonitorCollector extends AbstractStartStoppable implements ProxyMonitorCollector {
+
+    private static final Logger logger = LoggerFactory.getLogger(DefaultProxyMonitorCollector.class);
 
     private List<PingStatsResult> pingStatsResults;
 
@@ -44,8 +49,7 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
 
     private List<Listener> listeners = Lists.newCopyOnWriteArrayList();
 
-    @JsonIgnore
-    private List<TunnelInfo> tunnelInfos;
+    private List<DefaultTunnelInfo> tunnelInfos;
 
     @JsonIgnore
     private ScheduledFuture future;
@@ -58,14 +62,20 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
 
     private ProxyModel model;
 
-    public static final int CHECK_INTERVAL = 1000;
+    private IntSupplier checkInterval;
+
+    private Random random = new Random();
+
+    public DefaultProxyMonitorCollector() {
+    }
 
     public DefaultProxyMonitorCollector(ScheduledExecutorService scheduled,
                                         SimpleKeyedObjectPool<Endpoint, NettyClient> keyedObjectPool,
-                                        ProxyModel model) {
+                                        ProxyModel model, IntSupplier checkInterval) {
         this.scheduled = scheduled;
         this.model = model;
         this.objectPool = keyedObjectPool.getKeyPool(new DefaultProxyEndpoint(model.getUri()));
+        this.checkInterval = checkInterval;
     }
 
     @Override
@@ -84,7 +94,7 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
     }
 
     @Override
-    public List<TunnelSocketStatsResult> getTunnelSocketStatsResults() {
+    public List<TunnelSocketStatsResult> getSocketStatsResults() {
         return socketStatsResults == null ? Collections.emptyList() : socketStatsResults;
     }
 
@@ -93,9 +103,25 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
         return tunnelTrafficResults == null ? Collections.emptyList() : tunnelTrafficResults;
     }
 
+    public ProxyModel getModel() {
+        return model;
+    }
+
     @Override
-    public List<TunnelInfo> getTunnelInfos() {
+    public List<DefaultTunnelInfo> getTunnelInfos() {
         return tunnelInfos == null ? Collections.emptyList() : tunnelInfos;
+    }
+
+    @Override
+    public String toString() {
+        return "DefaultProxyMonitorCollector{" +
+                "pingStatsResults=" + pingStatsResults +
+                ", tunnelStatsResults=" + tunnelStatsResults +
+                ", socketStatsResults=" + socketStatsResults +
+                ", tunnelTrafficResults=" + tunnelTrafficResults +
+                ", tunnelInfos=" + tunnelInfos +
+                ", model=" + model +
+                '}';
     }
 
     @Override
@@ -111,9 +137,10 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
     @Override
     protected void doStart() {
         future = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
+
             @Override
             protected void doRun() {
-
+                logger.debug("[doStart] start to monitor proxy:{} every {} seconds", model.getUri(), checkInterval.getAsInt() / 1000);
                 SequenceCommandChain serial = new SequenceCommandChain(
                         new PingResultsUpdater().command(),
                         new TunnelStatsResultsUpdater().command(),
@@ -135,7 +162,7 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
                     }
                 });
             }
-        }, getStartInterval(), CHECK_INTERVAL, TimeUnit.MILLISECONDS);
+        }, getStartInterval(), checkInterval.getAsInt(), TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -146,7 +173,7 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
     }
 
     protected int getStartInterval() {
-        return 2000;
+        return 2000 + Math.abs(random.nextInt(3000));
     }
 
     private abstract class AbstractInfoUpdater<T> {
@@ -262,12 +289,12 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
                 }
                 tunnels.get(id).setTunnelStatsResult(tunnelStats);
             }
-            for(TunnelSocketStatsResult socketStats : getTunnelSocketStatsResults()) {
+            for(TunnelSocketStatsResult socketStats : getSocketStatsResults()) {
                 String id = socketStats.getTunnelId();
                 if(!tunnels.containsKey(id)) {
                     tunnels.put(id, new DefaultTunnelInfo(getProxyInfo(), id));
                 }
-                tunnels.get(id).setSocketStatsResult(socketStats);
+                tunnels.get(id).setTunnelSocketStatsResult(socketStats);
             }
             for(TunnelTrafficResult trafficResult : getTunnelTrafficResults()) {
                 String id = trafficResult.getTunnelId();
@@ -277,6 +304,7 @@ public class DefaultProxyMonitorCollector extends AbstractStartStoppable impleme
                 tunnels.get(id).setTunnelTrafficResult(trafficResult);
             }
             tunnelInfos = Lists.newArrayList(tunnels.values());
+            logger.debug("[TunnelAggregator] {}", tunnelInfos);
         }
     }
 }

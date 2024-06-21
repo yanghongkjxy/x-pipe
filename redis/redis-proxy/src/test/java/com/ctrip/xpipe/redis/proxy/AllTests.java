@@ -9,8 +9,10 @@ import com.ctrip.xpipe.redis.proxy.monitor.DefaultTunnelMonitorManagerTest;
 import com.ctrip.xpipe.redis.proxy.monitor.session.DefaultOutboundBufferMonitorTest;
 import com.ctrip.xpipe.redis.proxy.monitor.session.DefaultSessionMonitorTest;
 import com.ctrip.xpipe.redis.proxy.monitor.session.DefaultSessionStatsTest;
+import com.ctrip.xpipe.redis.proxy.monitor.stats.DefaultSocketStatsTest;
 import com.ctrip.xpipe.redis.proxy.monitor.stats.impl.DefaultPingStatsManagerTest;
 import com.ctrip.xpipe.redis.proxy.monitor.stats.impl.DefaultPingStatsTest;
+import com.ctrip.xpipe.redis.proxy.monitor.stats.impl.DefaultSocketStatsManagerTest;
 import com.ctrip.xpipe.redis.proxy.monitor.tunnel.DefaultTunnelMonitorTest;
 import com.ctrip.xpipe.redis.proxy.session.DefaultBackendSessionTest;
 import com.ctrip.xpipe.redis.proxy.session.DefaultFrontendSessionTest;
@@ -19,6 +21,7 @@ import com.ctrip.xpipe.redis.proxy.session.state.SessionClosingTest;
 import com.ctrip.xpipe.redis.proxy.session.state.SessionEstablishedTest;
 import com.ctrip.xpipe.redis.proxy.session.state.SessionInitTest;
 import com.ctrip.xpipe.redis.proxy.tunnel.BothSessionTryWriteTest;
+import com.ctrip.xpipe.redis.proxy.tunnel.DefaultTunnelManagerTest;
 import com.ctrip.xpipe.redis.proxy.tunnel.DefaultTunnelTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
@@ -47,6 +50,9 @@ import org.junit.runners.Suite;
         DefaultBackendSessionTest.class,
         DefaultFrontendSessionTest.class,
 
+        DefaultSocketStatsManagerTest.class,
+        DefaultSocketStatsTest.class,
+
         TestCloseOnBothSide.class,
         InternalNetworkHandlerTest.class,
         BothSessionTryWriteTest.class,
@@ -61,6 +67,7 @@ import org.junit.runners.Suite;
         DefaultPingStatsTest.class,
         TestTLSWithTwoProxy.class,
         TestMassTCPPacketWithOneProxyServer.class,
+        DefaultTunnelManagerTest.class,
 
 })
 public class AllTests {

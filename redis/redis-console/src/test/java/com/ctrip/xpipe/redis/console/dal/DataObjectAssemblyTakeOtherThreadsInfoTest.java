@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.console.dal;
 
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.redis.console.AbstractConsoleIntegrationTest;
 import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
@@ -147,7 +148,7 @@ public class DataObjectAssemblyTakeOtherThreadsInfoTest extends AbstractConsoleI
         ClusterTbl clusterTbl = clusterService.createCluster(buildClusterModel(clusterMeta));
         for(Map.Entry<String, ShardMeta> shardMetaEntry : clusterMeta.getShards().entrySet()) {
             ShardMeta shardMeta = shardMetaEntry.getValue();
-            shardService.createShard(clusterMeta.getId(), buildShardTbl(shardMeta, clusterTbl), null);
+            shardService.createShard(clusterMeta.getId(), buildShardTbl(shardMeta, clusterTbl), Collections.emptyMap());
             List<Pair<String, Integer>> pairs = new ArrayList<>();
             for(RedisMeta redisMeta : shardMeta.getRedises()) {
                 pairs.add(new Pair<> (redisMeta.getIp(), redisMeta.getPort()));
@@ -173,12 +174,12 @@ public class DataObjectAssemblyTakeOtherThreadsInfoTest extends AbstractConsoleI
         clusterModel.setClusterTbl(new ClusterTbl()
                 .setActivedcId(clusterMeta.getActiveDc().equalsIgnoreCase(dcNames[0]) ? dcTbl0.getId() : dcTbl1.getId())
                 .setClusterName(clusterMeta.getId())
+                .setClusterType(ClusterType.ONE_WAY.toString())
                 .setClusterDescription("test")
                 .setClusterAdminEmails("admin@ctrip.com")
                 .setOrganizationInfo(new OrganizationTbl().setId(2L).setOrgId(3))
                 .setClusterOrgName("org-2"));
-        List<DcTbl> slaveDcs = clusterMeta.getActiveDc().equalsIgnoreCase(dcNames[0]) ? Arrays.asList(dcTbl1) : Arrays.asList(dcTbl0);
-        clusterModel.setSlaveDcs(slaveDcs);
+        clusterModel.setDcs(Arrays.asList(dcTbl0, dcTbl1));
         return clusterModel;
     }
 

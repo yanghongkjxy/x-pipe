@@ -3,29 +3,39 @@ package com.ctrip.xpipe.redis.console;
 import com.ctrip.xpipe.monitor.CatConfig;
 import com.ctrip.xpipe.redis.console.cluster.ConsoleLeaderElector;
 import com.ctrip.xpipe.redis.console.config.impl.DefaultConsoleConfig;
-import com.ctrip.xpipe.redis.console.healthcheck.HealthChecker;
+import com.ctrip.xpipe.redis.checker.healthcheck.HealthChecker;
+import com.ctrip.xpipe.redis.checker.spring.ConsoleServerModeCondition;
 import com.ctrip.xpipe.spring.AbstractProfile;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.io.IOException;
 import java.sql.SQLException;
+
+import static com.ctrip.xpipe.redis.checker.spring.ConsoleServerModeCondition.KEY_SERVER_MODE;
 
 /**
  * @author lepdou 2016-11-09
  */
 @SpringBootApplication
 @EnableScheduling
+@MapperScan("com.ctrip.xpipe.redis.console.mapper")
+@ComponentScan("com.ctrip.xpipe.redis.console.spring")
 public class AppTest extends AbstratAppTest {
 
 	@BeforeClass
 	public static void beforeAppTestClass() {
 		System.setProperty(HealthChecker.ENABLED, "true");
+
+		// mysql重置命令，首次连接本地mysql时使用。非本地环境禁止开启
+		// System.setProperty("reset.mysql", "true");
 	}
 
 	@Before
@@ -42,9 +52,18 @@ public class AppTest extends AbstratAppTest {
 	@Test
 	public void startConsole8080() throws IOException, SQLException {
 
-//		startH2Server();
 		System.setProperty("server.port", "8080");
+		System.setProperty(KEY_SERVER_MODE, ConsoleServerModeCondition.SERVER_MODE.CONSOLE_CHECKER.name());
 		start();
+
+	}
+
+	@Test
+	public void startConsole8082() throws IOException, SQLException {
+
+		System.setProperty("console.do.checker", "true");
+		System.setProperty("console.do.manager", "false");
+		SpringApplication.run(App.class);
 
 	}
 
@@ -77,8 +96,6 @@ public class AppTest extends AbstratAppTest {
 
 	private void start() throws IOException, SQLException {
 		SpringApplication.run(AppTest.class);
-
-		startH2Server();
 	}
 
 

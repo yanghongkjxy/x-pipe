@@ -1,5 +1,8 @@
 package com.ctrip.xpipe.redis.console.controller.config;
 
+import com.ctrip.xpipe.redis.console.service.ClusterService;
+import com.ctrip.xpipe.redis.core.meta.MetaCache;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurerAdapter;
@@ -12,10 +15,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurerAdapter
 @Component
 public class MvcConfig extends WebMvcConfigurerAdapter{
 
+    @Autowired
+    private MetaCache metaCache;
+
+    @Autowired
+    private ClusterService clusterService;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new LogInterceptor());
+        registry.addInterceptor(new ClusterCheckInterceptor(metaCache, clusterService));
     }
 
 }

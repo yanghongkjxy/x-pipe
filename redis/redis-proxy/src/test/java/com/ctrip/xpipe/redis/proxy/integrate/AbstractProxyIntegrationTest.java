@@ -3,8 +3,10 @@ package com.ctrip.xpipe.redis.proxy.integrate;
 import com.ctrip.xpipe.AbstractTest;
 import com.ctrip.xpipe.api.endpoint.Endpoint;
 import com.ctrip.xpipe.api.foundation.FoundationService;
+import com.ctrip.xpipe.proxy.ProxyEndpoint;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpointManager;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.EndpointHealthChecker;
+import com.ctrip.xpipe.redis.core.proxy.endpoint.ProxyEndpointHealthChecker;
 import com.ctrip.xpipe.redis.proxy.DefaultProxyServer;
 import com.ctrip.xpipe.redis.proxy.ProxyServer;
 import com.ctrip.xpipe.redis.proxy.Session;
@@ -30,6 +32,9 @@ import io.netty.handler.logging.LoggingHandler;
 import org.junit.BeforeClass;
 
 import java.nio.charset.Charset;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.ctrip.xpipe.redis.proxy.monitor.session.DefaultSessionMonitor.SESSION_MONITOR_SHOULD_START;
@@ -65,10 +70,15 @@ public class AbstractProxyIntegrationTest extends AbstractTest {
         service = spy(FoundationService.DEFAULT);
         doReturn("127.0.0.1").when(service).getLocalIp();
         DefaultProxyEndpointManager endpointManager = new DefaultProxyEndpointManager(()-> 180);
-        endpointManager.setHealthChecker(new EndpointHealthChecker() {
+        endpointManager.setHealthChecker(new ProxyEndpointHealthChecker() {
             @Override
-            public boolean checkConnectivity(Endpoint endpoint) {
+            public boolean checkConnectivity(ProxyEndpoint endpoint) {
                 return true;
+            }
+
+            @Override
+            public boolean resetIfNeed(ProxyEndpoint endpoint) {
+                return false;
             }
         });
         TestResourceManager resourceManager = new TestResourceManager();
@@ -119,8 +129,24 @@ public class AbstractProxyIntegrationTest extends AbstractTest {
         return sb.toString();
     }
 
-    protected void write(ChannelFuture future, String sendout) {
-        future.channel().writeAndFlush(UnpooledByteBufAllocator.DEFAULT.buffer().writeBytes(sendout.getBytes()));
+    protected void write(ChannelFuture future, String sendout)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        if (!future.channel().isActive() && future.channel().isOpen()) {
+            logger.info("[write] wait channel active before writeAndFlush, otherwise flush will be failed");
+            future.get(3, TimeUnit.SECONDS);
+        } else if (!future.channel().isOpen()) {
+            logger.info("[write] channel already closed, write will be failed");
+        }
+
+        logger.info("[write] {}", sendout);
+        future.channel().writeAndFlush(UnpooledByteBufAllocator.DEFAULT.buffer().writeBytes(sendout.getBytes()))
+                .addListener(writeFuture -> {
+                    if (writeFuture.isSuccess()) {
+                        logger.info("[write][success] {}", sendout);
+                    } else {
+                        logger.info("[write][fail]", writeFuture.cause());
+                    }
+                });
     }
 
     public ChannelFuture startListenServer(int port) {
@@ -179,7 +205,7 @@ public class AbstractProxyIntegrationTest extends AbstractTest {
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             ByteBuf byteBuf = (ByteBuf) msg;
             byteBuf.retain();
-            cumulator.cumulate(ctx.channel().alloc(), cumulation, byteBuf);
+            cumulation = cumulator.cumulate(ctx.channel().alloc(), cumulation, byteBuf);
             buffer.set(cumulation);
             super.channelRead(ctx, msg);
         }

@@ -1,24 +1,26 @@
 package com.ctrip.xpipe.redis.console.controller.api.migrate;
 
 import com.ctrip.xpipe.api.migration.DcMapper;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
+import com.ctrip.xpipe.redis.console.cache.DcCache;
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
 import com.ctrip.xpipe.redis.console.controller.api.migrate.meta.*;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
 import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
+import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
 import com.ctrip.xpipe.redis.console.service.migration.MigrationService;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterActiveDcNotRequest;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterMigratingNow;
-import com.ctrip.xpipe.redis.console.service.migration.exception.ClusterNotFoundException;
-import com.ctrip.xpipe.redis.console.service.migration.exception.MigrationSystemNotHealthyException;
+import com.ctrip.xpipe.redis.console.service.migration.exception.*;
 import com.ctrip.xpipe.redis.console.service.migration.impl.MigrationRequest;
 import com.ctrip.xpipe.redis.console.service.migration.impl.TryMigrateResult;
+import com.ctrip.xpipe.utils.VisibleForTesting;
+import org.apache.commons.lang3.RandomUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author wenchao.meng
@@ -34,6 +36,9 @@ public class MigrationApi extends AbstractConsoleController {
     @Autowired
     private MigrationService migrationService;
 
+    @Autowired
+    private DcCache dcCache;
+
     @RequestMapping(value = "/checkandprepare", method = RequestMethod.POST, produces = {MediaType.APPLICATION_JSON_UTF8_VALUE})
     public CheckPrepareResponse checkAndPrepare(@RequestBody(required = true) CheckPrepareRequest checkMeta) {
 
@@ -42,24 +47,31 @@ public class MigrationApi extends AbstractConsoleController {
         logger.info("[checkAndPrepare]{}", checkMeta);
         CheckPrepareResponse checkRetMeta = new CheckPrepareResponse();
 
-        List<TryMigrateResult> maySuccessClusters = new LinkedList<>();
+        List<TryMigrateResult> availableClusters = new LinkedList<>();
+        List<ClusterMigratingNow> migratingClusters = new LinkedList<>();
         List<CheckPrepareClusterResponse> failClusters = new LinkedList<>();
 
         String fromIdc = checkMeta.getFromIdc();
         for (String clusterName : checkMeta.getClusters()) {
             try {
                 TryMigrateResult tryMigrateResult = migrationService.tryMigrate(clusterName, fromIdc, checkMeta.getToIdc());
-                maySuccessClusters.add(tryMigrateResult);
+                availableClusters.add(tryMigrateResult);
                 logger.info("[checkAndPrepare]{}", tryMigrateResult);
             } catch (ClusterNotFoundException e) {
                 failClusters.add(CheckPrepareClusterResponse.createFailResponse(clusterName, fromIdc, CHECK_FAIL_STATUS.CLUSTER_NOT_FOUND, e.getMessage()));
+                logger.error("[checkAndPrepare]" + clusterName, e);
+            } catch (MigrationNotSupportException e) {
+                failClusters.add(CheckPrepareClusterResponse.createFailResponse(clusterName, fromIdc, CHECK_FAIL_STATUS.CLUSTER_NOT_SUPPORT_MIGRATION, e.getMessage()));
                 logger.error("[checkAndPrepare]" + clusterName, e);
             } catch (ClusterActiveDcNotRequest e) {
                 failClusters.add(CheckPrepareClusterResponse.createFailResponse(clusterName, fromIdc, CHECK_FAIL_STATUS.ACTIVE_DC_ALREADY_NOT_REQUESTED, e.getMessage()));
                 logger.error("[checkAndPrepare]" + clusterName, e);
             } catch (ClusterMigratingNow e) {
-                failClusters.add(CheckPrepareClusterResponse.createFailResponse(clusterName, fromIdc, CHECK_FAIL_STATUS.ALREADY_MIGRATING, String.valueOf(e.getEventId())));
-                logger.error("[checkAndPrepare]" + clusterName, e);
+                logger.warn("[checkAndPrepare]" + clusterName, e);
+                migratingClusters.add(e);
+            } catch (ClusterMigratingNowButMisMatch e) {
+                failClusters.add(CheckPrepareClusterResponse.createFailResponse(clusterName, e.getFromIdc(), e.getToIdc(), CHECK_FAIL_STATUS.ALREADY_MIGRATING, String.valueOf(e.getEventId())));
+                logger.warn("[checkAndPrepare]" + clusterName, e);
             } catch (MigrationSystemNotHealthyException e) {
                 failClusters.add(CheckPrepareClusterResponse.createFailResponse(clusterName, fromIdc, CHECK_FAIL_STATUS.MIGRATION_SYSTEM_UNHEALTHY, String.valueOf(e.getMessage())));
                 logger.error("[checkAndPrepare]" + clusterName, e);
@@ -70,19 +82,27 @@ public class MigrationApi extends AbstractConsoleController {
         }
 
         Long eventId = -1L;
-        if (maySuccessClusters.size() > 0) {
+        if (availableClusters.size() > 0) {
             MigrationRequest request = new MigrationRequest("api_call");
             request.setTag("api_call");
-            maySuccessClusters.forEach((tryMigrateResult) -> request.addClusterInfo(new MigrationRequest.ClusterInfo(tryMigrateResult)));
+            logger.info("[checkAndPrepare][availableClusters]{}", availableClusters);
+            availableClusters.forEach((tryMigrateResult) -> request.addClusterInfo(new MigrationRequest.ClusterInfo(tryMigrateResult)));
             eventId = migrationService.createMigrationEvent(request);
+        }else if(migratingClusters.size() > 0){
+            int migraingSelected = RandomUtils.nextInt(0, migratingClusters.size());
+            ClusterMigratingNow clusterMigratingNow = migratingClusters.remove(migraingSelected);
+            eventId = clusterMigratingNow.getEventId();
+            availableClusters.add(new TryMigrateResult(clusterMigratingNow.getClusterName(), clusterMigratingNow.getFromIdc(), clusterMigratingNow.getToIdc()));
+            logger.info("[checkAndPrepare][clusterAlreadyMigrating, random choose one to return]{}", clusterMigratingNow.getMessage());
         }
 
         checkRetMeta.setTicketId(eventId);
+
+        availableClusters.forEach((successCluster) -> checkRetMeta.addCheckPrepareClusterResponse(CheckPrepareClusterResponse.createSuccessResponse(successCluster.getClusterName(), successCluster.getFromDcName(), successCluster.getToDcName())));
+        migratingClusters.forEach((migratingNow) -> checkRetMeta.addCheckPrepareClusterResponse(CheckPrepareClusterResponse.createFailResponse(
+                migratingNow.getClusterName(), migratingNow.getFromIdc(), migratingNow.getToIdc(), CHECK_FAIL_STATUS.ALREADY_MIGRATING, String.valueOf(migratingNow.getEventId()))));
         failClusters.forEach((failCluster) -> checkRetMeta.addCheckPrepareClusterResponse(failCluster));
-        maySuccessClusters.forEach((successCluster) -> checkRetMeta.addCheckPrepareClusterResponse(CheckPrepareClusterResponse.createSuccessResponse(successCluster.getClusterName(), successCluster.getFromDcName(), successCluster.getToDcName())));
-
         mapResponseIdc(checkRetMeta.getResults());
-
         return checkRetMeta;
     }
 
@@ -165,6 +185,43 @@ public class MigrationApi extends AbstractConsoleController {
         return rollbackResponse;
     }
 
+    @GetMapping(value = "history")
+    public Map<String, List<ClusterMigrationStatus>> getClusterMigrationHistory(@RequestBody MigrationHistoryReq req) {
+        logger.info("[history][{}-{}] {}", req.from, req.to, req.clusters);
+        long current = TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis());
+        if (req.from < 0 || req.from >= current) return Collections.emptyMap();
+        if (null == req.clusters || req.clusters.isEmpty()) return Collections.emptyMap();
+        if (req.to < req.from) req.to = current;
+
+        List<MigrationClusterTbl> migrationClusterTbls = migrationService.fetchMigrationClusters(req.clusters,
+                TimeUnit.SECONDS.toMillis(req.from), TimeUnit.SECONDS.toMillis(req.to));
+        Map<String, List<ClusterMigrationStatus>> resp = new HashMap<>();
+        migrationClusterTbls.forEach(migrationClusterTbl -> {
+            String clusterName = migrationClusterTbl.getCluster().getClusterName();
+            if (!resp.containsKey(clusterName)) resp.put(clusterName, new ArrayList<>());
+            ClusterMigrationStatus clusterMigrationStatus = ClusterMigrationStatus.from(migrationClusterTbl, dcCache);
+            resp.get(clusterName).add(clusterMigrationStatus);
+        });
+
+        return resp;
+    }
+
+    @RequestMapping(value = "/migration/system/health/status", method = RequestMethod.GET)
+    public RetMessage getMigrationSystemHealthStatus() {
+        logger.info("[getMigrationSystemHealthStatus]");
+        try {
+            return migrationService.getMigrationSystemHealth();
+        } catch (Exception e) {
+            logger.error("[getMigrationSystemHealthStatus]", e);
+            return RetMessage.createFailMessage(e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/unsupported/clusters", method = RequestMethod.GET)
+    public Set<String> getMigrationUnsupportedClusters() {
+        return migrationService.migrationUnsupportedClusters();
+    }
+
 
     private void mapResponseIdc(List<? extends AbstractClusterMeta> results) {
 
@@ -203,5 +260,10 @@ public class MigrationApi extends AbstractConsoleController {
             checkMeta.setToIdc(toIdcReverse);
         }
 
+    }
+
+    @VisibleForTesting
+    protected void setMigrationService(MigrationService migrationService) {
+        this.migrationService = migrationService;
     }
 }

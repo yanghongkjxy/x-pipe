@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.meta.server;
 
+import com.ctrip.xpipe.redis.core.entity.ApplierMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.tuple.Pair;
 
@@ -13,12 +14,21 @@ public interface MetaServerStateChangeHandler {
 	/**
 	 * 1. make sure keeper is at proper state
 	 * 2. notify console
-	 * @param clusterId
-	 * @param shardId
+	 * @param clusterDbId
+	 * @param shardDbId
 	 * @param activeKeeper if activeKeeper == null, means that no keeper is active 
 	 * @throws Exception
 	 */
-	void keeperActiveElected(String clusterId, String shardId, KeeperMeta activeKeeper);
+	default void keeperActiveElected(Long clusterDbId, Long shardDbId, KeeperMeta activeKeeper) {}
 
-	void keeperMasterChanged(String clusterId, String shardId, Pair<String, Integer> newMaster);
+	default void keeperMasterChanged(Long clusterDbId, Long shardDbId, Pair<String, Integer> newMaster) {}
+
+	default void applierActiveElected(Long clusterDbId, Long shardDbId, ApplierMeta activeApplier, String srcSids) {}
+
+	default void applierMasterChanged(Long clusterDbId, Long shardDbId, Pair<String, Integer> newMaster, String srcSids) {}
+
+	default void currentMasterChanged(Long clusterDbId, Long shardDbId) {}
+
+	default void peerMasterChanged(Long clusterDbId, Long shardDbId) {}
+
 }

@@ -15,6 +15,8 @@ public class CtripAlertEmailTemplate implements CtripEmailTemplate {
 
     public static final String SEND_CODE = "37030053";
 
+    public static final int EMAIL_TYPE_ALERT = 3;
+
     @Override
     public Integer getAppID() {
         return APP_ID;
@@ -39,7 +41,6 @@ public class CtripAlertEmailTemplate implements CtripEmailTemplate {
     public void decorateBodyContent(Email email) {
         if(email == null)   return;
         String content = email.getBodyContent();
-        content = "<entry><htmlContent><![CDATA[" + content + "]]></htmlContent></entry>";
         email.setBodyContent(content);
     }
 }

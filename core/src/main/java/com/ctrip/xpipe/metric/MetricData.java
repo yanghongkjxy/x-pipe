@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.metric;
 
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.endpoint.HostPort;
 import com.google.common.collect.Maps;
 
@@ -16,10 +17,15 @@ public class MetricData {
     private String dcName;
     private String clusterName;
     private String shardName;
+    private String clusterType;
     private long timestampMilli;
     private double value;
     private HostPort hostPort;
     private volatile Map<String, String> tags;
+
+    public MetricData(String metricType) {
+        this(metricType, null, null, null);
+    }
 
     public MetricData(String metricType, String dcName, String clusterName, String shardName){
         this.metricType = metricType;
@@ -38,6 +44,14 @@ public class MetricData {
 
     public void setHostPort(HostPort hostPort) {
         this.hostPort = hostPort;
+    }
+
+    public void setClusterType(ClusterType clusterType) {
+        this.clusterType = clusterType.toString();
+    }
+
+    public String getClusterType() {
+        return clusterType;
     }
 
     public String getClusterName() {
@@ -81,6 +95,19 @@ public class MetricData {
 
     public Map<String, String> getTags() {
         return tags;
+    }
+
+    @Override
+    public String toString() {
+        return "MetricData{" +
+                "metricType='" + metricType + '\'' +
+                ", dcName='" + dcName + '\'' +
+                ", clusterName='" + clusterName + '\'' +
+                ", shardName='" + shardName + '\'' +
+                ", timestampMilli=" + timestampMilli +
+                ", value=" + value +
+                ", hostPort=" + hostPort +
+                '}';
     }
 }
 

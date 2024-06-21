@@ -7,29 +7,32 @@ import com.ctrip.xpipe.api.server.PARTIAL_STATE;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.netty.filechannel.ReferenceFileRegion;
 import com.ctrip.xpipe.redis.core.protocal.CAPA;
+import com.ctrip.xpipe.redis.core.protocal.cmd.DefaultPsync;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
+import com.ctrip.xpipe.redis.core.protocal.protocal.SimpleStringParser;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOp;
+import com.ctrip.xpipe.redis.core.store.*;
 import com.ctrip.xpipe.redis.keeper.RedisClient;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisSlave;
 import com.ctrip.xpipe.redis.keeper.SLAVE_STATE;
 import com.ctrip.xpipe.redis.keeper.exception.RedisKeeperRuntimeException;
-import com.ctrip.xpipe.utils.ChannelUtil;
-import com.ctrip.xpipe.utils.CloseState;
-import com.ctrip.xpipe.utils.ClusterShardAwareThreadFactory;
-import com.ctrip.xpipe.utils.VisibleForTesting;
+import com.ctrip.xpipe.redis.keeper.util.KeeperReplIdAwareThreadFactory;
+import com.ctrip.xpipe.utils.*;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.SettableFuture;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -52,10 +55,11 @@ public class DefaultRedisSlave implements RedisSlave {
 	private PARTIAL_STATE partialState = PARTIAL_STATE.UNKNOWN;
 	
 	private Long rdbFileOffset;
+	private ReplicationProgress<?> progressAfterRdb;
 	private EofType eofType;
 		
 	private ScheduledExecutorService scheduled;
-	private ScheduledFuture<?> 		  pingFuture, waitDumpTimeoutFuture;
+	private ScheduledFuture<?> 		  pingFuture, waitTimeoutFuture;
 
 	private static final int pingIntervalMilli = 1000;
 
@@ -66,8 +70,12 @@ public class DefaultRedisSlave implements RedisSlave {
 
 	private ExecutorService psyncExecutor;
 
-	private RedisClient redisClient;
-	
+	private RedisClient<RedisKeeperServer> redisClient;
+
+	private AtomicBoolean writingCommands = new AtomicBoolean(false);
+
+	private volatile boolean coldStart = false;
+
 	private ChannelFutureListener writeExceptionListener = new ChannelFutureListener() {
 
 		private AtomicLong atomicLong = new AtomicLong(0);
@@ -79,7 +87,7 @@ public class DefaultRedisSlave implements RedisSlave {
 				long failCount = atomicLong.incrementAndGet();
 				//avoid write too much error msg
 				if((failCount & (failCount -1)) == 0){
-					logger.error("[operationComplete][write fail]" +failCount + "," + DefaultRedisSlave.this, future.cause());
+					getLogger().error("[operationComplete][write fail]" +failCount + "," + DefaultRedisSlave.this, future.cause());
 				}
 			}
 		}
@@ -88,7 +96,7 @@ public class DefaultRedisSlave implements RedisSlave {
 	private CloseState closeState = new CloseState();
 	private SettableFuture<Boolean> psyncProcessed = SettableFuture.create();
 
-	public DefaultRedisSlave(RedisClient redisClient){
+	public DefaultRedisSlave(RedisClient<RedisKeeperServer> redisClient){
 		this.redisClient = redisClient;
 		this.setSlaveListeningPort(redisClient.getSlaveListeningPort());
 		this.redisClient.addChannelCloseReleaseResources(this);
@@ -97,45 +105,82 @@ public class DefaultRedisSlave implements RedisSlave {
 
 	private void initExecutor(Channel channel) {
 		
+		String threadPrefix = buildThreadPrefix(channel);
+		ReplId replId = redisClient.getRedisServer().getReplId();
+		psyncExecutor = Executors.newSingleThreadExecutor(KeeperReplIdAwareThreadFactory.create(replId, threadPrefix));
+		scheduled = Executors.newScheduledThreadPool(1, KeeperReplIdAwareThreadFactory.create(replId, threadPrefix));
+	}
+
+	protected String buildThreadPrefix(Channel channel) {
 		String getRemoteIpLocalPort = ChannelUtil.getRemoteAddr(channel);
-		String threadPrefix = "RedisClientPsync-" + getRemoteIpLocalPort;
-		String clusterId = redisClient.getRedisKeeperServer().getClusterId();
-		String shardId = redisClient.getRedisKeeperServer().getShardId();
-		psyncExecutor = Executors.newSingleThreadExecutor(ClusterShardAwareThreadFactory.create(clusterId, shardId, threadPrefix));
-		scheduled = Executors.newScheduledThreadPool(1, ClusterShardAwareThreadFactory.create(clusterId, shardId, threadPrefix));
+		return  "RedisClientPsync-" + getRemoteIpLocalPort;
 	}
 
 	@Override
 	public void waitForRdbDumping() {
 		
 		if(this.slaveState == SLAVE_STATE.REDIS_REPL_WAIT_RDB_DUMPING){
-			logger.info("[waitForRdbDumping][already waiting]{}", this);
+			getLogger().info("[waitForRdbDumping][already waiting]{}", this);
 			return;
 		}
 		
 		this.slaveState = SLAVE_STATE.REDIS_REPL_WAIT_RDB_DUMPING;
-		
-		logger.info("[waitForRdbDumping][begin ping]{}", this);
+		if (null == pingFuture || pingFuture.isDone()) {
+			waitForRdb();
+		} else {
+			getLogger().info("[waitForRdbDumping][already start wait]{}", this);
+		}
+	}
+
+	@Override
+	public void waitForSeqFsync() {
+		if(this.slaveState == SLAVE_STATE.REDIS_REPL_WAIT_SEQ_FSYNC) {
+			getLogger().info("[waitForSeqFsync][already waiting]{}", this);
+			return;
+		}
+
+		logger.info("[waitForSeqFsync]{}", this);
+		this.slaveState = SLAVE_STATE.REDIS_REPL_WAIT_SEQ_FSYNC;
+
+		if (null == pingFuture || pingFuture.isDone()) {
+			waitForRdb();
+		} else {
+			getLogger().info("[waitForSeqFsync][already start wait]{}", this);
+		}
+	}
+
+	private void waitForRdb() {
+		getLogger().info("[waitForRdb][begin ping]{}", this);
 		pingFuture = scheduled.scheduleAtFixedRate(new Runnable() {
-			
+
 			@Override
 			public void run() {
 				try{
 					sendMessage("\n".getBytes());
 				}catch(Exception e){
-					logger.error("[run][sendPing]" + redisClient, e);
+					getLogger().error("[run][sendPing]" + redisClient, e);
 				}
 			}
 		}, pingIntervalMilli, pingIntervalMilli, TimeUnit.MILLISECONDS);
-		
-		waitDumpTimeoutFuture = scheduled.schedule(new AbstractExceptionLogTask() {
-			
+
+		waitTimeoutFuture = scheduled.schedule(new AbstractExceptionLogTask() {
+
 			@Override
 			protected void doRun() throws IOException {
-				logger.info("[waitForRdbDumping][timeout][close slave]{}", DefaultRedisSlave.this);
+				getLogger().info("[waitForRdb][timeout][close slave]{}", DefaultRedisSlave.this);
 				close();
 			}
 		}, rdbDumpMaxWaitMilli, TimeUnit.MILLISECONDS);
+	}
+
+	@Override
+	public void markColdStart() {
+		this.coldStart = true;
+	}
+
+	@Override
+	public boolean isColdStart() {
+		return coldStart;
 	}
 
 	@Override
@@ -144,16 +189,16 @@ public class DefaultRedisSlave implements RedisSlave {
 	}
 
 	@Override
-	public void ack(Long ackOff) {
+	public void ack(Long ackOff, boolean putOnline) {
 		
-		if(logger.isDebugEnabled()){
-			logger.debug("[ack]{}, {}", this , ackOff);
+		if(getLogger().isDebugEnabled()){
+			getLogger().debug("[ack]{}, {}", this , ackOff);
 		}
 		
-		if(putOnLineOnAck){
+		if(putOnline && putOnLineOnAck){
 			
 			putOnLineOnAck = false;
-			logger.info("[ack][put slave online]{}", this);
+			getLogger().info("[ack][put slave online]{}", this);
 			sendCommandForFullSync();
 		}
 		
@@ -177,6 +222,11 @@ public class DefaultRedisSlave implements RedisSlave {
 	}
 
 	@Override
+	public Long processedOffset() {
+		return getAck();
+	}
+
+	@Override
 	public Long getAck() {
 		return this.replAckOff;
 	}
@@ -185,36 +235,48 @@ public class DefaultRedisSlave implements RedisSlave {
 	public Long getAckTime() {
 		return this.replAckTime;
 	}
+
+	protected String buildMarkBeforeFsync(ReplicationProgress<?> rdbProgress) {
+		return StringUtil.join(" ", DefaultPsync.FULL_SYNC, getRedisServer().getKeeperRepl().replId(),
+				rdbProgress.getProgress().toString());
+	}
 	
 	@Override
-	public void beginWriteRdb(EofType eofType, long rdbFileOffset) {
-
-
-		logger.info("[beginWriteRdb]{}, {}", eofType, rdbFileOffset);
+	public void beginWriteRdb(EofType eofType, ReplicationProgress<?> rdbProgress) {
+		getLogger().info("[beginWriteRdb]{}, {}", eofType, rdbProgress);
 		closeState.makeSureOpen();
 
+		SimpleStringParser simpleStringParser = new SimpleStringParser(buildMarkBeforeFsync(rdbProgress));
+
+		getLogger().info("[setRdbFileInfo]{},{}", simpleStringParser.getPayload(), this);
+		sendMessage(simpleStringParser.format());
+
 		if(!eofType.support(getCapas())){
-			logger.warn("[beginWriteRdb][eoftype not supported]{}, {}, {}", this, eofType, getCapas());
+			getLogger().warn("[beginWriteRdb][eoftype not supported]{}, {}, {}", this, eofType, getCapas());
 		}
-		
+
 		partialState = PARTIAL_STATE.FULL;
 		slaveState = SLAVE_STATE.REDIS_REPL_SEND_BULK;
-		
-		this.rdbFileOffset = rdbFileOffset;
+
 		this.eofType = eofType;
-		
+		if (rdbProgress instanceof OffsetReplicationProgress) {
+			this.progressAfterRdb = new OffsetReplicationProgress(((OffsetReplicationProgress) rdbProgress).getProgress() + 1);
+		} else {
+			this.progressAfterRdb = rdbProgress;
+		}
+
 		putOnLineOnAck = eofType.putOnLineOnAck();
-		
+
 		cancelWaitRdb();
-		
-    	channel().writeAndFlush(eofType.getStart());
+
+		channel().writeAndFlush(eofType.getStart());
 	}
 
 	
 	@Override
 	public void rdbWriteComplete() {
 		
-		logger.info("[rdbWriteComplete]{}", this);
+		getLogger().info("[rdbWriteComplete]{}", this);
 		
 		ByteBuf end = eofType.getEnd();
 		if(end != null){
@@ -223,8 +285,8 @@ public class DefaultRedisSlave implements RedisSlave {
 		
 
 		if(slaveState == SLAVE_STATE.REDIS_REPL_SEND_BULK){
-			if(logger.isInfoEnabled()){
-				logger.info("[writeComplete][rdbWriteComplete]" + this);
+			if(getLogger().isInfoEnabled()){
+				getLogger().info("[writeComplete][rdbWriteComplete]" + this);
 			}
 		}
 		this.slaveState = SLAVE_STATE.REDIS_REPL_ONLINE;
@@ -238,53 +300,72 @@ public class DefaultRedisSlave implements RedisSlave {
 	private void cancelWaitRdb() {
 		
 		if(pingFuture != null){
-			logger.info("[cancelWaitRdb][cancel ping]{}", this);
+			getLogger().info("[cancelWaitRdb][cancel ping]{}", this);
 			pingFuture.cancel(true);
 		}
-		if(waitDumpTimeoutFuture != null){
-			logger.info("[cancelWaitRdb][cancel wait dump rdb]{}", this);
-			waitDumpTimeoutFuture.cancel(true);
+		if(waitTimeoutFuture != null){
+			getLogger().info("[cancelWaitRdb][cancel wait dump rdb]{}", this);
+			waitTimeoutFuture.cancel(true);
 		}
 	}
 
 	@Override
-	public void beginWriteCommands(long beginOffset) {
+	public void beginWriteCommands(ReplicationProgress<?> progress) {
 
 		closeState.makeSureOpen();
 
 		try {
 
-			if(partialState == PARTIAL_STATE.UNKNOWN){
-				partialState = PARTIAL_STATE.PARTIAL;
+			if (writingCommands.compareAndSet(false, true)) {
+				if(partialState == PARTIAL_STATE.UNKNOWN){
+					partialState = PARTIAL_STATE.PARTIAL;
+				}
+				getLogger().info("[beginWriteCommands]{}, {}", this, progress);
+				slaveState = SLAVE_STATE.REDIS_REPL_ONLINE;
+				getRedisServer().getReplicationStore().addCommandsListener(progress, this);
+			} else {
+				getLogger().warn("[beginWriteCommands][already writing]{}, {}", this, progress);
 			}
-			logger.info("[beginWriteCommands]{}, {}", this, beginOffset);
-			slaveState = SLAVE_STATE.REDIS_REPL_ONLINE;
-			getRedisKeeperServer().getReplicationStore().addCommandsListener(beginOffset, this);
 		} catch (IOException e) {
-			throw new RedisKeeperRuntimeException("[beginWriteCommands]" + beginOffset + "," + this, e);
+			throw new RedisKeeperRuntimeException("[beginWriteCommands]" + progress + "," + this, e);
 		}
 	}
 
-
 	protected void sendCommandForFullSync() {
 		
-		logger.info("[sendCommandForFullSync]{}, {}", this, rdbFileOffset +1);
+		getLogger().info("[sendCommandForFullSync]{}, {}", this, progressAfterRdb);
 		
 		processPsyncSequentially(new AbstractExceptionLogTask() {
 			
 			@Override
 			protected void doRun() throws Exception {
-				beginWriteCommands(rdbFileOffset + 1);
+				try {
+					beginWriteCommands(progressAfterRdb);
+				} catch (Throwable th) {
+					getLogger().error("[sendCommandForFullSync][failed]", th);
+					if (DefaultRedisSlave.this.isOpen()) {
+						getLogger().error("[sendCommandForFullSync] close slave");
+						DefaultRedisSlave.this.close();
+					}
+				}
 			}
 		});
 	}
 
 	@Override
-	public ChannelFuture onCommand(ReferenceFileRegion referenceFileRegion) {
-
+	public ChannelFuture onCommand(CommandFile currentFile, long filePosition, Object cmd) {
 		closeState.makeSureOpen();
-		logger.debug("[onCommand]{}, {}", this, referenceFileRegion);
-		return doWriteFile(referenceFileRegion);
+		getLogger().debug("[onCommand]{}, {}", this, cmd);
+
+		Object command = cmd;
+
+		if (cmd instanceof RedisOp) {
+		    command = ((RedisOp) cmd).buildRESP();
+		}
+
+		ChannelFuture future = channel().writeAndFlush(command);
+		future.addListener(writeExceptionListener);
+		return future;
 	}
 
 	@Override
@@ -318,19 +399,30 @@ public class DefaultRedisSlave implements RedisSlave {
 
 	@Override
 	public void processPsyncSequentially(Runnable runnable) {
+		closeState.makeSureNotClosed();
 		psyncExecutor.execute(runnable);
 	}
 
 	@Override
 	public void markPsyncProcessed() {
 
-		logger.info("[markPsyncProcessed]{}", this);
+		getLogger().info("[markPsyncProcessed]{}", this);
 		psyncProcessed.set(true);
 	}
 
 	@Override
 	public String metaInfo() {
 		return String.format("%s(%s:%d)", roleDesc(), ip(), getSlaveListeningPort());
+	}
+
+	@Override
+	public boolean supportProgress(Class<? extends ReplicationProgress<?>> clazz) {
+		return clazz.equals(OffsetReplicationProgress.class);
+	}
+
+	@Override
+	public boolean supportRdb(RdbStore.Type rdbType) {
+		return (RdbStore.Type.RORDB.equals(rdbType) && capaOf(CAPA.RORDB)) || RdbStore.Type.NORMAL.equals(rdbType);
 	}
 
 	private int remotePort() {
@@ -353,9 +445,9 @@ public class DefaultRedisSlave implements RedisSlave {
 	 * testSleepMilli is for test
 	 */
 	protected void close(int testSleepMilli) {
-		logger.info("[close]{}", this);
+		getLogger().info("[close]{}", this);
 		if(closeState.isClosed()){
-			logger.info("[close][already closed]{}", this);
+			getLogger().info("[close][already closed]{}", this);
 			return;
 		}
 
@@ -380,7 +472,7 @@ public class DefaultRedisSlave implements RedisSlave {
 				scheduled.schedule(new AbstractExceptionLogTask() {
 					@Override
 					protected void doRun() throws Exception {
-						logger.info("[wait for psync processed timeout close slave]{}", DefaultRedisSlave.this);
+						getLogger().info("[wait for psync processed timeout close slave]{}", DefaultRedisSlave.this);
 						doRealClose();
 					}
 				}, waitForPsyncProcessedTimeoutMilli, TimeUnit.MILLISECONDS);
@@ -391,10 +483,11 @@ public class DefaultRedisSlave implements RedisSlave {
 	protected void doRealClose() throws IOException {
 
 		synchronized (closeState) {
-			logger.info("[doRealClose]{}", this);
+			getLogger().info("[doRealClose]{}", this);
 			closeState.setClosed();
 			redisClient.close();
-			psyncExecutor.shutdownNow();
+			/* shutdown single thread pool after other tasks finished */
+			psyncExecutor.submit(psyncExecutor::shutdown);
 			scheduled.shutdownNow();
 		}
 	}
@@ -417,8 +510,13 @@ public class DefaultRedisSlave implements RedisSlave {
 		return redisClient.becomeSlave();
 	}
 
-	public RedisKeeperServer getRedisKeeperServer() {
-		return redisClient.getRedisKeeperServer();
+	@Override
+	public RedisSlave becomeXSlave() {
+		return redisClient.becomeSlave();
+	}
+
+	public RedisKeeperServer getRedisServer() {
+		return redisClient.getRedisServer();
 	}
 
 	public void setSlaveListeningPort(int port) {
@@ -469,6 +567,10 @@ public class DefaultRedisSlave implements RedisSlave {
 	public void addChannelCloseReleaseResources(Releasable releasable) {
 		redisClient.addChannelCloseReleaseResources(releasable);
 	}
+	
+	protected Logger getLogger() {
+		return logger;
+	}
 
 	@Override
 	public void setClientEndpoint(Endpoint endpoint) {
@@ -482,12 +584,12 @@ public class DefaultRedisSlave implements RedisSlave {
 
 	@Override
 	public String toString() {
-		return this.redisClient.toString();
+		return String.format("%s[ack:%d]", this.redisClient.toString(), this.getAck());
 	}
 
 	@Override
 	public void release() throws Exception {
-		logger.info("[release]{}", this);
+		getLogger().info("[release]{}", this);
 		close();
 	}
 
@@ -519,5 +621,10 @@ public class DefaultRedisSlave implements RedisSlave {
 	@VisibleForTesting
 	protected CloseState getCloseState() {
 		return closeState;
+	}
+
+	@VisibleForTesting
+	protected void setPutOnLineOnAck(boolean putOnLineOnAck) {
+		this.putOnLineOnAck = putOnLineOnAck;
 	}
 }

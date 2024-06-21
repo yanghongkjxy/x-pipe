@@ -18,28 +18,34 @@ public class DefaultDcKeeperMasterChooserTest extends AbstractDcKeeperMasterChoo
 	@Before
 	public void beforeDefaultDcKeeperMasterChooserTest() throws Exception{
 		
-		defaultDcKeeperMasterChooser = new DefaultDcKeeperMasterChooser(clusterId, shardId,
+		defaultDcKeeperMasterChooser = new DefaultDcKeeperMasterChooser(clusterDbId, shardDbId,
 				multiDcService, dcMetaCache, currentMetaManager, scheduled, 
 				getXpipeNettyClientKeyedObjectPool());
 	}
 	
 	@Test
-	public void testPrimaryAlgorithm(){
+	public void testMasterChooserAlgorithm(){
 		
 		Assert.assertNull(defaultDcKeeperMasterChooser.getKeeperMasterChooserAlgorithm());
-		
-		when(dcMetaCache.isCurrentDcPrimary(clusterId, shardId)).thenReturn(true);
-		
+
+		when(dcMetaCache.isCurrentShardParentCluster(clusterDbId, shardDbId)).thenReturn(true);
+		when(dcMetaCache.isCurrentDcBackUp(clusterDbId)).thenReturn(false);
+
 		defaultDcKeeperMasterChooser.chooseKeeperMaster();
 
 		Assert.assertTrue(defaultDcKeeperMasterChooser.getKeeperMasterChooserAlgorithm() instanceof PrimaryDcKeeperMasterChooserAlgorithm);
 		
-		when(dcMetaCache.isCurrentDcPrimary(clusterId, shardId)).thenReturn(false);
-		
+		when(dcMetaCache.isCurrentDcBackUp(clusterDbId)).thenReturn(true);
+
 		defaultDcKeeperMasterChooser.chooseKeeperMaster();
 
 		Assert.assertTrue(defaultDcKeeperMasterChooser.getKeeperMasterChooserAlgorithm() instanceof BackupDcKeeperMasterChooserAlgorithm);
-		
+
+		when(dcMetaCache.isCurrentShardParentCluster(clusterDbId, shardDbId)).thenReturn(false);
+
+		defaultDcKeeperMasterChooser.chooseKeeperMaster();
+
+		Assert.assertTrue(defaultDcKeeperMasterChooser.getKeeperMasterChooserAlgorithm() instanceof HeteroDownStreamDcKeeperMasterChooserAlgorithm);
 	}
 	
 }

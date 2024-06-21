@@ -38,13 +38,18 @@
 						<span>回滚</span>
 					</a>
 					<a type="button" class="btn btn-danger radius-border-fat"
-					   ng-click="forcePublishMigrationCluster( migrationCluster.migrationCluster.migrationEventId,migrationCluster.migrationCluster.clusterId)"
-					   ng-if="migrationCluster.migrationCluster.status == 'PartialSuccess'">
+					   ng-click="forceSkipChecking( migrationCluster.migrationCluster.migrationEventId,migrationCluster.migrationCluster.clusterId)"
+					   ng-if="migrationCluster.migrationCluster.status == 'CheckingFail'">
+						<span>强制跳过检查</span>
+					</a>
+					<a type="button" class="btn btn-danger radius-border-fat"
+					   ng-click="forcePublish( migrationCluster.migrationCluster.migrationEventId,migrationCluster.migrationCluster.clusterId)"
+					   ng-if="migrationCluster.migrationCluster.status == 'PartialSuccess' || migrationCluster.migrationCluster.status == 'PartialRetryFail'">
 						<span>强制发布</span>
 					</a>
 					<a type="button" class="btn btn-danger radius-border-fat"
 					   ng-click="forceEndMigrationCluster( migrationCluster.migrationCluster.migrationEventId,migrationCluster.migrationCluster.clusterId)"
-					   ng-if="migrationCluster.migrationCluster.status == 'Publish'">
+					   ng-if="migrationCluster.migrationCluster.status == 'Publish' || migrationCluster.migrationCluster.status == 'PublishFail'">
 						<span>强制结束</span>
 					</a>
 				</div>

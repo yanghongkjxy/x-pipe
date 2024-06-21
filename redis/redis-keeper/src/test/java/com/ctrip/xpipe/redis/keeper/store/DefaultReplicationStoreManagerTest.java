@@ -1,11 +1,11 @@
 package com.ctrip.xpipe.redis.keeper.store;
 
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
+import com.ctrip.xpipe.gtid.GtidSet;
 import com.ctrip.xpipe.lifecycle.LifecycleHelper;
 import com.ctrip.xpipe.redis.core.protocal.protocal.LenEofType;
 import com.ctrip.xpipe.redis.core.redis.RunidGenerator;
-import com.ctrip.xpipe.redis.core.store.MetaStore;
-import com.ctrip.xpipe.redis.core.store.ReplicationStore;
+import com.ctrip.xpipe.redis.core.store.*;
 import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
 import com.ctrip.xpipe.redis.keeper.config.TestKeeperConfig;
 import io.netty.buffer.ByteBuf;
@@ -41,7 +41,6 @@ public class DefaultReplicationStoreManagerTest extends AbstractRedisKeeperTest 
 		keeperConfig.setReplicationStoreGcIntervalSeconds(replicationStoreGcIntervalSeconds);
 		keeperConfig.setMinTimeMilliToGcAfterCreate(minTimeMilliToGcAfterCreate);
 	}
-
 
 	@Test
 	public void testNotCreateWhileNotInitialized() throws Exception {
@@ -239,10 +238,8 @@ public class DefaultReplicationStoreManagerTest extends AbstractRedisKeeperTest 
 		String keeperRunid = randomKeeperRunid();
 		
 		File baseDir = new File(getTestFileDir());
-		String clusterId = "cluster1";
-		String shardId = "shard1";
-		DefaultReplicationStoreManager mgr = (DefaultReplicationStoreManager) createReplicationStoreManager(clusterId,
-				shardId, keeperRunid, baseDir);
+		ReplId replId = getReplId();
+		DefaultReplicationStoreManager mgr = (DefaultReplicationStoreManager) createReplicationStoreManager(replId, keeperRunid, baseDir);
 
 		LifecycleHelper.initializeIfPossible(mgr);
 
@@ -251,8 +248,7 @@ public class DefaultReplicationStoreManagerTest extends AbstractRedisKeeperTest 
 
 		currentStore = mgr.create();
 
-		assertEquals(clusterId, mgr.getClusterName());
-		assertEquals(shardId, mgr.getShardName());
+		assertEquals(replId, mgr.getReplId());
 		assertEquals(currentStore, mgr.getCurrent());
 
 		DefaultReplicationStore newCurrentStore = (DefaultReplicationStore) mgr.create();
@@ -261,18 +257,25 @@ public class DefaultReplicationStoreManagerTest extends AbstractRedisKeeperTest 
 
 		MetaStore metaStore = newCurrentStore.getMetaStore();
 		metaStore.setMasterAddress(new DefaultEndPoint("redis://127.0.0.1:6379"));
-		newCurrentStore.beginRdb("masterRunid", 0, new LenEofType(100));
+		RdbStore rdbStore = newCurrentStore.prepareRdb("masterRunid", 0, new LenEofType(100));
+		rdbStore.updateRdbGtidSet(GtidSet.EMPTY_GTIDSET);
+		rdbStore.updateRdbType(RdbStore.Type.NORMAL);
+		newCurrentStore.confirmRdb(rdbStore);
 
 		ByteBuf cmdBuf = Unpooled.buffer();
 		cmdBuf.writeByte(9);
-		newCurrentStore.getCommandStore().appendCommands(cmdBuf);
+		newCurrentStore.cmdStore.appendCommands(cmdBuf);
 
-		DefaultReplicationStoreManager mgr2 = (DefaultReplicationStoreManager) createReplicationStoreManager(clusterId,shardId, keeperRunid, baseDir);
-		
+		DefaultReplicationStoreManager mgr2 = (DefaultReplicationStoreManager) createReplicationStoreManager(replId, keeperRunid, baseDir);
+		LifecycleHelper.initializeIfPossible(mgr2);
+
 		assertEquals(metaStore.getReplId(), mgr2.getCurrent().getMetaStore().getReplId());
 		assertEquals(metaStore.beginOffset(), mgr2.getCurrent().getMetaStore().beginOffset());
 		assertEquals(metaStore.getMasterAddress(), mgr2.getCurrent().getMetaStore().getMasterAddress());
 		assertEquals(metaStore.beginOffset(), mgr2.getCurrent().getMetaStore().beginOffset());
+
+		LifecycleHelper.disposeIfPossible(mgr);
+		LifecycleHelper.disposeIfPossible(mgr2);
 	}
 
 }

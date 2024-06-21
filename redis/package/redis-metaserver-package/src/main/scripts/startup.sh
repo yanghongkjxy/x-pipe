@@ -17,6 +17,39 @@ function getPortFromPathOrDefault(){
     fi
     echo $result
 }
+function getTotalMem() {
+    echo `free -m | egrep "^Mem" | awk -F " " '{print $2}'`
+}
+function getSafeXmx() {
+    total=`getTotalMem`
+    SAFE_PERCENT=55
+    MAX_MEM=8192
+
+    if [ "$total" -gt 10240 ]
+    then
+      echo "$MAX_MEM"
+    else
+      echo `expr $total \* $SAFE_PERCENT / 100`
+    fi
+}
+
+function getSafeXmn() {
+    xmx=$1
+    XMN_PERCENT=75
+    echo `expr $xmx \* $XMN_PERCENT / 100`
+}
+
+function getSafeMaxDirect() {
+    total=`getTotalMem`
+    SAFE_PERCENT=10
+    if [ "$total" -gt 10240 ]
+    then
+      echo 1024
+    else
+      echo `expr $total \* $SAFE_PERCENT / 100`
+    fi
+}
+
 function toUpper(){
     echo $(echo $1 | tr [a-z] [A-Z])
 }
@@ -26,6 +59,13 @@ function getEnv(){
         ENV=`cat /opt/settings/server.properties | egrep -i "^env" | awk -F= '{print $2}'`
     fi
     echo `toUpper $ENV`
+}
+function getIdc(){
+    IDC=normal
+    if [ -f /opt/settings/server.properties ];then
+        IDC=`cat /opt/settings/server.properties | egrep -i "^idc" | awk -F= '{print $2}'`
+    fi
+    echo `toUpper $IDC`
 }
 function makedir(){
     if [ ! -d $1 ]; then
@@ -62,10 +102,33 @@ function getCurrentRealPath(){
     echo $dir
 }
 
+function trySaveHeapTrace() {
+    logdir=$1
+    suffix=`date +%Y%m%d%H%M%S`
+    if [[ -f "$logdir/heap_trace.txt" ]]; then
+        cp "$logdir/heap_trace.txt" "$logdir/heap_trace_$suffix.txt"
+    fi
+}
+
+function tryRemoveHeapTrace() {
+    logdir=$1
+    suffix=`date -d "$(date +%Y%m)01 last month" +%Y%m`
+    find "$logdir" -type f -name "heap_trace_$suffix*.txt" -delete
+}
+
+function tryRemoveJarLog() {
+    logdir=$1
+    appname=$2
+    find "$logdir" -type f -name "$appname_*.log" -delete
+}
+
 #VARS
 FULL_DIR=`getCurrentRealPath`
 SERVICE_NAME=redis-meta
 LOG_DIR=/opt/logs/100004375
+`trySaveHeapTrace ${LOG_DIR}`
+`tryRemoveHeapTrace ${LOG_DIR}`
+`tryRemoveJarLog ${LOG_DIR} ${SERVICE_NAME}`
 SERVER_PORT=`getPortFromPathOrDefault $FULL_DIR 8080`
 JMX_PORT=` expr $SERVER_PORT + 10000 `
 IP=`ifconfig | grep "inet.10" | awk '{print $2}; NR == 1 {exit}'`
@@ -85,31 +148,50 @@ ENV=`getEnv`
 echo "current env:"$ENV
 if [ $ENV = "PRO" ]
 then
-    #GB
-    USED_MEM=8
-    XMN=6
-    MAX_DIRECT=1
-    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}g -Xmx${USED_MEM}g  -XX:+AlwaysPreTouch -Xmn${XMN}g -XX:MaxDirectMemorySize=${MAX_DIRECT}g"
+    #MB
+    USED_MEM=`getSafeXmx`
+    XMN=`getSafeXmn $USED_MEM`
+    MAX_DIRECT=`getSafeMaxDirect`
+    META_SPACE=256
+    MAX_META_SPACE=256
+    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m  -XX:+AlwaysPreTouch -Xmn${XMN}m -XX:MaxDirectMemorySize=${MAX_DIRECT}m -XX:MetaspaceSize=${META_SPACE}m -XX:MaxMetaspaceSize=${MAX_META_SPACE}m"
 elif [ $ENV = "FWS" ] || [ $ENV = "FAT" ];then
     #MB
     USED_MEM=600
     XMN=450
     MAX_DIRECT=100
-    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m -Xmn${XMN}m -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m"
+    META_SPACE=128
+    MAX_META_SPACE=128
+    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m -Xmn${XMN}m -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m -XX:MetaspaceSize=${META_SPACE}m -XX:MaxMetaspaceSize=${MAX_META_SPACE}m"
 else
-    #MB
-    USED_MEM=800
-    XMN=600
-    MAX_DIRECT=100
-    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m -Xmn${XMN}m -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m"
+    IDC=`getIdc`
+    if [ $IDC = "PTJQ" ] || [ $IDC = "PTOY" ];then
+        #MB
+        USED_MEM=8192
+        XMN=6144
+        META_SPACE=256
+        MAX_META_SPACE=256
+        MAX_DIRECT=100
+    else
+        #MB
+        USED_MEM=`getSafeXmx`
+        XMN=`getSafeXmn $USED_MEM`
+        META_SPACE=128
+        MAX_META_SPACE=128
+        MAX_DIRECT=`getSafeMaxDirect`
+    fi
+    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m -Xmn${XMN}m -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m -XX:MetaspaceSize=${META_SPACE}m -XX:MaxMetaspaceSize=${MAX_META_SPACE}m"
 fi
-export JAVA_OPTS="$JAVA_OPTS -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=128m  -XX:+UseParNewGC -XX:MaxTenuringThreshold=5 -XX:+UseConcMarkSweepGC -XX:+UseCMSInitiatingOccupancyOnly -XX:+ScavengeBeforeFullGC -XX:+UseCMSCompactAtFullCollection -XX:+CMSParallelRemarkEnabled -XX:CMSFullGCsBeforeCompaction=9 -XX:CMSInitiatingOccupancyFraction=60 -XX:-CMSClassUnloadingEnabled -XX:SoftRefLRUPolicyMSPerMB=0 -XX:-ReduceInitialCardMarks -XX:+CMSPermGenSweepingEnabled -XX:CMSInitiatingPermOccupancyFraction=70 -XX:+ExplicitGCInvokesConcurrent -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationConcurrentTime -XX:+PrintHeapAtGC -XX:+HeapDumpOnOutOfMemoryError -XX:-OmitStackTraceInFastThrow -Duser.timezone=Asia/Shanghai -Dclient.encoding.override=UTF-8 -Dfile.encoding=UTF-8 -Xloggc:$LOG_DIR/heap_trace.txt -XX:HeapDumpPath=$LOG_DIR/HeapDumpOnOutOfMemoryError/  -Dcom.sun.management.jmxremote.port=$JMX_PORT -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=${IP} -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -Djava.security.egd=file:/dev/./urandom"
+export JAVA_OPTS="$JAVA_OPTS -XX:+UseParNewGC -XX:MaxTenuringThreshold=5 -XX:+UseConcMarkSweepGC -XX:+UseCMSInitiatingOccupancyOnly -XX:+ScavengeBeforeFullGC -XX:+UseCMSCompactAtFullCollection -XX:+CMSParallelRemarkEnabled -XX:CMSFullGCsBeforeCompaction=9 -XX:CMSInitiatingOccupancyFraction=60 -XX:-CMSClassUnloadingEnabled -XX:SoftRefLRUPolicyMSPerMB=1000 -XX:-ReduceInitialCardMarks -XX:+CMSPermGenSweepingEnabled -XX:CMSInitiatingPermOccupancyFraction=70 -XX:+ExplicitGCInvokesConcurrent -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationConcurrentTime -XX:+PrintHeapAtGC -XX:+HeapDumpOnOutOfMemoryError -XX:-OmitStackTraceInFastThrow -Duser.timezone=Asia/Shanghai -Dclient.encoding.override=UTF-8 -Dfile.encoding=UTF-8 -Xloggc:$LOG_DIR/heap_trace.txt -XX:HeapDumpPath=$LOG_DIR/HeapDumpOnOutOfMemoryError/  -Dcom.sun.management.jmxremote.port=$JMX_PORT -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=${IP} -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -Dio.netty.allocator.useCacheForAllThreads=false -Djava.security.egd=file:/dev/./urandom"
 
 PATH_TO_JAR=$SERVICE_NAME".jar"
 SERVER_URL="http://localhost:$SERVER_PORT"
 STARTUP_LOG=$LOG_DIR"/startup.logger"
 
-if [[ -z "$JAVA_HOME" && -d /usr/java/latest/ ]]; then
+#set the jdk to 1.8 version
+if [[ -z "$JAVA_HOME" && -d /usr/java/jdk1.8.0_121/ ]]; then
+    export JAVA_HOME=/usr/java/jdk1.8.0_121
+elif [[ -z "$JAVA_HOME" && -d /usr/java/latest/ ]]; then
     export JAVA_HOME=/usr/java/latest/
 fi
 
@@ -159,7 +241,7 @@ declare -i max_counter=16 # 16*5=80s
 declare -i total_time=0
 
 printf "Waiting for server startup" >> $STARTUP_LOG
-until [[ (( counter -ge max_counter )) || "$(curl -X GET --silent --connect-timeout 1 --head $SERVER_URL | grep "Coyote")" != "" ]];
+until [[ (( counter -ge max_counter )) || "$(curl -X GET --silent --connect-timeout 1 --head $SERVER_URL/health | grep "HTTP/1.1 200")" != "" ]];
 do
     printf "." >> $STARTUP_LOG
     counter+=1

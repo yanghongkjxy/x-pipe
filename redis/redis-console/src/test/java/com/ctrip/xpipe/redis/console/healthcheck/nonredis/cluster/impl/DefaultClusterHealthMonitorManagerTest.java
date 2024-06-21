@@ -1,7 +1,8 @@
 package com.ctrip.xpipe.redis.console.healthcheck.nonredis.cluster.impl;
 
-import com.ctrip.xpipe.redis.console.healthcheck.RedisHealthCheckInstance;
-import com.ctrip.xpipe.redis.console.healthcheck.impl.DefaultRedisInstanceInfo;
+import com.ctrip.xpipe.cluster.ClusterType;
+import com.ctrip.xpipe.redis.checker.healthcheck.RedisHealthCheckInstance;
+import com.ctrip.xpipe.redis.checker.healthcheck.impl.DefaultRedisInstanceInfo;
 import com.ctrip.xpipe.redis.console.healthcheck.nonredis.cluster.ClusterHealthState;
 import com.ctrip.xpipe.redis.console.model.ShardTbl;
 import com.ctrip.xpipe.redis.console.service.ShardService;
@@ -33,8 +34,8 @@ public class DefaultClusterHealthMonitorManagerTest {
     public void testHealthCheckMasterDown() {
         fakeShardService("cluster", "shard1", "shard2", "shard3", "shard4", "shard5", "shard6", "shard7");
         RedisHealthCheckInstance instance = mock(RedisHealthCheckInstance.class);
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard1", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard1", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterDown(instance);
         Assert.assertEquals(Sets.newHashSet("cluster"), manager.getWarningClusters(ClusterHealthState.LEAST_ONE_DOWN));
         manager.healthCheckMasterDown(instance);
@@ -46,12 +47,12 @@ public class DefaultClusterHealthMonitorManagerTest {
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.THREE_QUARTER_DOWN));
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.FULL_DOWN));
 
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard2", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard2", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterDown(instance);
 
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard3", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard3", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterDown(instance);
 
         Assert.assertEquals(Sets.newHashSet("cluster"), manager.getWarningClusters(ClusterHealthState.LEAST_ONE_DOWN));
@@ -65,8 +66,8 @@ public class DefaultClusterHealthMonitorManagerTest {
     public void testHealthCheckMasterUp() {
         testHealthCheckMasterDown();
         RedisHealthCheckInstance instance = mock(RedisHealthCheckInstance.class);
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard8", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard8", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterUp(instance);
 
         Assert.assertEquals(Sets.newHashSet("cluster"), manager.getWarningClusters(ClusterHealthState.LEAST_ONE_DOWN));
@@ -75,12 +76,12 @@ public class DefaultClusterHealthMonitorManagerTest {
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.THREE_QUARTER_DOWN));
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.FULL_DOWN));
 
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard3", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard3", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterUp(instance);
 
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard2", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard2", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterUp(instance);
 
         Assert.assertEquals(Sets.newHashSet("cluster"), manager.getWarningClusters(ClusterHealthState.LEAST_ONE_DOWN));
@@ -89,8 +90,8 @@ public class DefaultClusterHealthMonitorManagerTest {
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.THREE_QUARTER_DOWN));
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.FULL_DOWN));
 
-        when(instance.getRedisInstanceInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard1", null, ""));
-        instance.getRedisInstanceInfo().isMaster(true);
+        when(instance.getCheckInfo()).thenReturn(new DefaultRedisInstanceInfo("dc", "cluster", "shard1", null, "", ClusterType.ONE_WAY));
+        instance.getCheckInfo().isMaster(true);
         manager.healthCheckMasterUp(instance);
 
         Assert.assertEquals(Sets.newHashSet(), manager.getWarningClusters(ClusterHealthState.LEAST_ONE_DOWN));

@@ -1,5 +1,8 @@
 package com.ctrip.xpipe.redis.console.service;
 
+import com.ctrip.xpipe.redis.console.model.RedisTbl;
+import com.ctrip.xpipe.redis.console.model.ShardModel;
+
 import java.util.List;
 import java.util.function.BiPredicate;
 
@@ -15,4 +18,10 @@ public interface KeeperAdvancedService {
 
   List<KeeperBasicInfo> findBestKeepers(String dcName, String clusterName);
 
+  List<RedisTbl> getNewKeepers(String dcName, String clusterName, ShardModel shardModel, String srcKeeperContainerIp, String targetKeeperContainerIp);
+
+  List<RedisTbl> getSwitchMaterNewKeepers(ShardModel shardModel);
+
+  List<KeeperBasicInfo> findBestKeepersByKeeperContainer(String targetKeeperContainerIp, int beginPort,
+                                                         BiPredicate<String, Integer> keeperGood, int returnCount);
 }

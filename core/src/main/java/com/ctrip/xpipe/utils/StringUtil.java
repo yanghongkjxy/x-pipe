@@ -13,6 +13,24 @@ import java.util.function.Function;
  */
 public class StringUtil {
 
+    public static String makeSimpleName(String first, String second){
+
+        String desc;
+        if(first == null && second == null){
+            desc = "[null]";
+        }
+        if(first == null){
+            desc = second;
+        }else if(second == null){
+            desc = first;
+        }else if(second.startsWith(first)){
+            desc = second;
+        }else {
+            desc = first+ "." +second;
+        }
+        return "[" + desc + "]";
+    }
+
     public static String subHead(String str, int maxLen){
 
         if(str == null || str.length() <= maxLen){
@@ -90,7 +108,7 @@ public class StringUtil {
     }
 
     public static boolean isEmpty(String str) {
-        return str == null || str.trim().length() == 0;
+        return str == null || str.trim().isEmpty();
     }
 
     public static String[] splitRemoveEmpty(String regex, String str) {
@@ -195,8 +213,59 @@ public class StringUtil {
     }
 
     private static final String LINE_SPLITTER = "\\r?\\n";
+    private static final String COMMA_SPLITTER = "\\s*,\\s*";
 
     public static String[] splitByLineRemoveEmpty(String str) {
         return splitRemoveEmpty(LINE_SPLITTER, str);
     }
+
+    public static String[] splitByCommaRemoveEmpty(String str) {
+        return splitRemoveEmpty(COMMA_SPLITTER, str);
+    }
+
+    public static boolean contains(String str, String subStr) {
+        if (str == null || subStr == null) {
+            return false;
+        }
+
+        int subStrLen = subStr.length();
+
+        if (subStrLen == 0) {
+            return true;
+        }
+
+        return str.contains(subStr);
+    }
+
+    public static int compareVersionSize(String version1, String version2) {
+        if (version1 == null || version2 == null) {
+            throw new IllegalArgumentException("version cannot be null");
+        }
+
+        String[] arr1 = version1.split("\\.");
+        String[] arr2 = version2.split("\\.");
+
+        int i = 0;
+        while (i < arr1.length || i < arr2.length) {
+            int v1 = i < arr1.length ? parseVersion(arr1[i]) : 0;
+            int v2 = i < arr2.length ? parseVersion(arr2[i]) : 0;
+
+            if (v1 < v2) {
+                return -1;
+            } else if (v1 > v2) {
+                return 1;
+            }
+            i++;
+        }
+        return 0;
+    }
+
+    private static int parseVersion(String s) {
+        try {
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("version contains non-numeric characters");
+        }
+    }
+
 }

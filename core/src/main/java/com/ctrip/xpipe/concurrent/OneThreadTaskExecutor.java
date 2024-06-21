@@ -5,13 +5,16 @@ import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.api.command.CommandFutureListener;
 import com.ctrip.xpipe.api.lifecycle.Destroyable;
 import com.ctrip.xpipe.command.DefaultRetryCommandFactory;
+import com.ctrip.xpipe.command.LogIgnoreCommand;
 import com.ctrip.xpipe.command.RetryCommandFactory;
+import com.ctrip.xpipe.exception.ExceptionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -25,7 +28,9 @@ public class OneThreadTaskExecutor implements Destroyable {
 
     private Executor executors;
 
-    private Queue<Command<?>> tasks = new ConcurrentLinkedQueue<>();
+    private Command<?> currentCommand;
+
+    protected Queue<Command<?>> tasks;
 
     private AtomicBoolean isRunning = new AtomicBoolean(false);
 
@@ -38,15 +43,29 @@ public class OneThreadTaskExecutor implements Destroyable {
         this(DefaultRetryCommandFactory.noRetryFactory(), executors);
     }
 
+    public OneThreadTaskExecutor(Executor executors, int queueCapacity) {
+        this(DefaultRetryCommandFactory.noRetryFactory(), executors, queueCapacity);
+    }
+
     public OneThreadTaskExecutor(RetryCommandFactory<?> retryCommandFactory, Executor executors) {
         this.retryCommandFactory = retryCommandFactory;
         this.executors = executors;
+        tasks = new ConcurrentLinkedQueue<>();
+    }
+
+    public OneThreadTaskExecutor(RetryCommandFactory<?> retryCommandFactory, Executor executors, int queueCapacity) {
+        this.retryCommandFactory = retryCommandFactory;
+        this.executors = executors;
+        tasks = new LinkedBlockingQueue<>(queueCapacity);
     }
 
     public void executeCommand(Command<?> command) {
 
         logger.debug("[executeCommand][offer it in pool]{}", command);
-        boolean offer = tasks.offer(command);
+        boolean offer = false;
+        synchronized (this) {
+            offer = tasks.offer(command);
+        }
         if (!offer) {
             throw new IllegalStateException("pool full:" + tasks.size());
         }
@@ -69,8 +88,10 @@ public class OneThreadTaskExecutor implements Destroyable {
                 logger.debug("[doRun][already run]{}", this);
                 return;
             }
-
-            Command<?> command = tasks.poll();
+            Command<?> command = null;
+            synchronized (this) {
+                command = tasks.poll();
+            }
             if (command == null) {
                 isRunning.compareAndSet(true, false);
                 logger.debug("[no command][exit]{}", OneThreadTaskExecutor.this);
@@ -84,31 +105,50 @@ public class OneThreadTaskExecutor implements Destroyable {
             }
 
             Command retryCommand = retryCommand(command);
+            logCommand(command, retryCommand);
+            currentCommand = retryCommand;
 
-            logger.info("[doRun][begin]{}", command);
-            retryCommand.execute().addListener(new CommandFutureListener() {
+            if (!(command instanceof LogIgnoreCommand)) logger.info("[doRun][begin]{}", command);
+            retryCommand.future().addListener(new CommandFutureListener() {
                 @Override
                 public void operationComplete(CommandFuture commandFuture) throws Exception {
-
+                    currentCommand = null;
                     if (!isRunning.compareAndSet(true, false)) {
                         logger.error("[doRun][already exit]");
                     }
 
-                    if(commandFuture.isSuccess()){
-                        logger.info("[doRun][ end ][succeed]{}", command);
-                    }else {
-                        logger.error("[doRun][ end ][fail]" + command, commandFuture.cause());
-                    }
                     doExecute();
                 }
             });
+            retryCommand.execute();
         }
 
-        private Command retryCommand(Command<?> command) throws Exception {
-            return retryCommandFactory.createRetryCommand(command);
+    }
 
-        }
+    protected void logCommand(Command<?> originCommand, Command<?> retryCommand) {
+        retryCommand.future().addListener(new CommandFutureListener() {
+            @Override
+            public void operationComplete(CommandFuture commandFuture) throws Exception {
+                if (originCommand instanceof LogIgnoreCommand) {
+                    // do not log
+                } else if (commandFuture.isSuccess()){
+                    logger.info("[doRun][ end ][succeed]{}", originCommand);
+                } else if (ExceptionUtils.isStackTraceUnnecessary(commandFuture.cause())) {
+                    logger.error("[doRun][ end ][fail]{}, {}", originCommand, commandFuture.cause().getMessage());
+                } else {
+                    logger.error("[doRun][ end ][fail]" + originCommand, commandFuture.cause());
+                }
+            }
+        });
+    }
 
+    protected Command retryCommand(Command<?> command) throws Exception {
+        return retryCommandFactory.createRetryCommand(command);
+
+    }
+
+    protected Command<?> getCurrentCommand() {
+        return currentCommand;
     }
 
     @Override

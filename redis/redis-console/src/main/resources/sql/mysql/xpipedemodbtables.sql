@@ -13,6 +13,19 @@ create table ZONE_TBL
   KEY `DataChange_LastTime` (`DataChange_LastTime`)
 ) DEFAULT CHARSET=utf8 COMMENT='zone base info';
 
+drop table if exists AZ_GROUP_TBL;
+CREATE TABLE `AZ_GROUP_TBL` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `name` varchar(20) NOT NULL DEFAULT '' COMMENT 'az group name',
+  `region` varchar(20) NOT NULL DEFAULT '' COMMENT 'az group region',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+  `DataChange_LastTime` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'last modify time',
+  `deleted` tinyint(3) unsigned NOT NULL DEFAULT '0' COMMENT 'logic delete',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_name_deleted` (`name`,`deleted`),
+  KEY `ix_datachange_lasttime` (`DataChange_LastTime`)
+) DEFAULT CHARSET=utf8 COMMENT='multi az combine, inside region'
+
 -- DC Table
 drop table if exists DC_TBL;
 CREATE TABLE `DC_TBL` (
@@ -29,7 +42,18 @@ CREATE TABLE `DC_TBL` (
   KEY `DataChange_LastTime` (`DataChange_LastTime`)
 ) DEFAULT CHARSET=utf8 COMMENT='dc base info';
 
-
+drop table if exists AZ_GROUP_MAPPING_TBL;
+CREATE TABLE `AZ_GROUP_MAPPING_TBL` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `az_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference dc id now',
+  `az_group_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference az group id',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+  `DataChange_LastTime` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'last modify time',
+  `deleted` tinyint(3) unsigned NOT NULL DEFAULT '0' COMMENT 'logic delete',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_az_group` (`az_id`,`az_group_id`),
+  KEY `ix_datachange_lasttime` (`DataChange_LastTime`)
+) DEFAULT CHARSET=utf8 COMMENT='az & az group mapping table'
 
 -- Meta Server Table
 drop table if exists METASERVER_TBL;
@@ -70,23 +94,42 @@ drop table if exists CLUSTER_TBL;
 CREATE TABLE `CLUSTER_TBL` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `cluster_name` varchar(128) NOT NULL DEFAULT 'default' COMMENT 'cluster name',
+  `cluster_type` varchar(32) NOT NULL DEFAULT 'one_way' COMMENT 'cluster type',
   `activedc_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'active dc id',
   `cluster_description` varchar(1024) NOT NULL DEFAULT 'nothing' COMMENT 'cluster description',
   `cluster_last_modified_time` varchar(40) NOT NULL DEFAULT '' COMMENT 'last modified tag',
   `status` varchar(24) NOT NULL DEFAULT 'normal' COMMENT 'cluster status',
+  `migration_event_id` bigint(20) unsigned NOT Null DEFAULT '0' COMMENT 'related migration event on processing',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   `is_xpipe_interested` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'is xpipe interested',
   `cluster_org_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'organization id of cluster',
   `cluster_admin_emails` varchar(1024) DEFAULT ' ' COMMENT 'persons email who in charge of this cluster',
+  `cluster_designated_route_ids` varchar(1024) NOT NULL DEFAULT '' COMMENT 'designated routeIds',
   `create_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'cluster create time',
 
   PRIMARY KEY (`id`),
   UNIQUE KEY `cluster_name` (`cluster_name`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
-  KEY `is_xpipe_interested` (`is_xpipe_interested`)
+  KEY `is_xpipe_interested` (`is_xpipe_interested`),
+  KEY `Deleted` (`deleted`),
+  KEY `Deleted_ClusterType` (`deleted`,`cluster_type`)
 ) DEFAULT CHARSET=utf8 COMMENT='clusters info';
 
+drop table if exists AZ_GROUP_CLUSTER_TBL;
+CREATE TABLE `AZ_GROUP_CLUSTER_TBL` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `cluster_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference cluster id',
+  `az_group_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference az_group id',
+  `active_az_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'active ac id in az group',
+  `az_group_cluster_type` varchar(32) NOT NULL DEFAULT '' COMMENT 'cluster type of az group',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'create time',
+  `DataChange_LastTime` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT 'last modify time',
+  `deleted` tinyint(3) unsigned NOT NULL DEFAULT '0' COMMENT 'logic delete',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cluster_az_group` (`cluster_id`,`az_group_id`),
+  KEY `ix_datachange_lasttime` (`DataChange_LastTime`)
+) DEFAULT CHARSET=utf8 COMMENT='cluster&az_group mapping table'
 
 -- DC Cluster Table
 drop table if exists DC_CLUSTER_TBL;
@@ -96,13 +139,20 @@ CREATE TABLE `DC_CLUSTER_TBL` (
   `cluster_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference cluster id',
   `metaserver_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference metaserver id',
   `dc_cluster_phase` int(11) NOT NULL DEFAULT '1' COMMENT 'dc cluster phase',
+  `active_redis_check_rules` varchar(128) DEFAULT NULL COMMENT 'active redis check rules',
+  `group_name` varchar(20) DEFAULT NULL COMMENT 'reference group name, null means same as dc name',
+  `group_type` varchar(32) DEFAULT NULL COMMENT 'reference group type, DRMaster and Master',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  `az_group_cluster_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference az group cluster id',
   PRIMARY KEY (`dc_cluster_id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `DcId` (`dc_id`),
-  KEY `ClusterId` (`cluster_id`)
-) DEFAULT CHARSET=utf8 COMMENT='dc cluster base info';
+  KEY `ClusterId` (`cluster_id`),
+  KEY `DcIdPrimary` (`dc_id`,`dc_cluster_id`,`deleted`),
+  KEY `idx_1` (`cluster_id`,`deleted`),
+  KEY `idx_2` (`dc_id`,`deleted`)
+) DEFAULT CHARSET=utf8 COMMENT='dc cluster base info'
 
 
 -- Shard Table
@@ -116,7 +166,8 @@ CREATE TABLE `SHARD_TBL` (
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
   KEY `DataChangeLastTime` (`DataChange_LastTime`),
-  KEY `cluster_id` (`cluster_id`)
+  KEY `ClusterId` (`cluster_id`),
+  KEY `Deleted` (`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='shard base info';
 
 
@@ -134,7 +185,10 @@ CREATE TABLE `DC_CLUSTER_SHARD_TBL` (
   PRIMARY KEY (`dc_cluster_shard_id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `DcClusterId` (`dc_cluster_id`),
-  KEY `ShardId` (`shard_id`)
+  KEY `ShardId` (`shard_id`),
+  KEY `ShardId_Deleted` (`shard_id`,`deleted`),
+  KEY `Deleted` (`deleted`),
+  KEY `DcClusterId_Deleted` (`dc_cluster_id`,`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='dc cluster shard base info';
 
 
@@ -154,10 +208,13 @@ CREATE TABLE `REDIS_TBL` (
   `keepercontainer_id` bigint(20) unsigned DEFAULT NULL COMMENT 'keepercontainer id',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  `deleted_at` int(11) NOT NULL DEFAULT '0' COMMENT 'deleted time',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `ip_port_deleted_at` (`redis_ip`,`redis_port`,`deleted_at`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `DcClusterShardId` (`dc_cluster_shard_id`),
-  KEY `keeper_active` (`keeper_active`)
+  KEY `keeper_active` (`keeper_active`),
+  KEY `DcClusterShardId_Deleted` (`dc_cluster_shard_id`,`deleted`)
 ) DEFAULT CHARSET=utf8 COMMENT='redis base info';
 
 
@@ -167,12 +224,14 @@ drop table if exists KEEPERCONTAINER_TBL;
 CREATE TABLE `KEEPERCONTAINER_TBL` (
   `keepercontainer_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `keepercontainer_dc` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference keepercontainer dc',
+  `az_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'available zone id',
   `keepercontainer_ip` varchar(40) NOT NULL DEFAULT '0.0.0.0' COMMENT 'keepercontainer ip',
   `keepercontainer_port` int(11) NOT NULL DEFAULT '0' COMMENT 'keepercontainer port',
   `keepercontainer_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'keepercontainer active status',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   `keepercontainer_org_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'organization id of keeper container',
+  `keepercontainer_disk_type` varchar(64) not null default 'default'
   PRIMARY KEY (`keepercontainer_id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
   KEY `keepercontainer_dc` (`keepercontainer_dc`)
@@ -185,6 +244,7 @@ drop table if exists migration_event_tbl;
 CREATE TABLE `migration_event_tbl` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `start_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'event start time',
+  `break` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'break or not',
   `operator` varchar(128) NOT NULL DEFAULT 'xpipe' COMMENT 'event operator',
   `event_tag` varchar(150) NOT NULL DEFAULT 'eventtag' COMMENT 'event mark tag',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
@@ -210,7 +270,9 @@ CREATE TABLE `migration_cluster_tbl` (
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
   `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
-  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+  KEY `DataChange_LastTime` (`DataChange_LastTime`),
+  KEY `ClusterId_MigrationEventId` (`cluster_id`,`migration_event_id`),
+  KEY `MigrationEventId` (`migration_event_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=51 DEFAULT CHARSET=utf8 COMMENT='migration cluster tbl';
 
 
@@ -226,7 +288,8 @@ CREATE TABLE `migration_shard_tbl` (
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
   `deleted` tinyint(4) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
-  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+  KEY `DataChange_LastTime` (`DataChange_LastTime`),
+  KEY `MigrationClusterId` (`migration_cluster_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8 COMMENT='migration events on specific shard';
 
 
@@ -235,6 +298,7 @@ drop table if exists config_tbl;
 CREATE TABLE `config_tbl` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
   `key` varchar(128) NOT NULL DEFAULT '' COMMENT 'key',
+  `sub_key` varchar(128) NOT NULL DEFAULT '' COMMENT 'sub_key',
   `value` varchar(1024) DEFAULT '' COMMENT 'value',
   `until` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'for potential use',
   `latest_update_user` varchar(512) DEFAULT '' COMMENT 'latest person who update the config',
@@ -244,7 +308,7 @@ CREATE TABLE `config_tbl` (
   `deleted` tinyint(4) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`),
-  UNIQUE KEY `key` (`key`)
+  UNIQUE KEY `key_sub_key` (`key`,`sub_key`)
 ) ENGINE=InnoDB AUTO_INCREMENT=12 DEFAULT CHARSET=utf8 COMMENT='xpipe config';
 
 INSERT INTO config_tbl (`key`, `value`, `desc`) VALUES ('sentinel.auto.process', 'true', '自动增删哨兵');
@@ -291,8 +355,10 @@ CREATE TABLE `route_tbl` (
   `src_proxy_ids` varchar(128) NOT NULL DEFAULT '' COMMENT 'source proxies ids',
   `dst_proxy_ids` varchar(128) NOT NULL DEFAULT '' COMMENT 'destination proxies ids',
   `optional_proxy_ids` varchar(128) NOT NULL DEFAULT '' COMMENT 'optional relay proxies, ids separated by whitespace',
+  `is_public` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'public or not, public means all cluster can use',
   `active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'active or not',
   `tag` varchar(128) NOT NULL DEFAULT '1' COMMENT 'tag for console or meta',
+  `description` varchar(1024) NOT NULL DEFAULT '' COMMENT 'description for route',
   `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
   `deleted` tinyint(4) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
   PRIMARY KEY (`id`),
@@ -312,3 +378,115 @@ CREATE TABLE `proxy_tbl` (
   PRIMARY KEY (`id`),
   KEY `DataChange_LastTime` (`DataChange_LastTime`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='Proxy Info';
+
+-- az_tbl
+drop table if exists az_tbl;
+CREATE TABLE `az_tbl` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `dc_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'dc id',
+  `active` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'active or not',
+  `az_name` varchar(128) NOT NULL DEFAULT '' COMMENT 'available zone name',
+  `description` varchar(1024) NOT NULL DEFAULT '' COMMENT 'description for available zone',
+  `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
+  `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_az_name` (`az_name`),
+  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='available zone Info';
+
+-- redis_check_rule_tbl
+drop table if exists redis_check_rule_tbl;
+CREATE TABLE `redis_check_rule_tbl` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `check_type` varchar(128) NOT NULL DEFAULT '' COMMENT 'check type',
+  `param` varchar(256) NOT NULL DEFAULT '' COMMENT 'params for check',
+  `description` varchar(1024) NOT NULL DEFAULT '' COMMENT 'description for redis check rule',
+  `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
+  `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  PRIMARY KEY (`id`),
+  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='redis check rule';
+
+-- sentinel_group_tbl
+drop table if exists sentinel_group_tbl;
+CREATE TABLE `sentinel_group_tbl`
+(
+    `sentinel_group_id`   bigint(20) NOT NULL AUTO_INCREMENT COMMENT '哨兵组id',
+    `cluster_type`        varchar(40)  NOT NULL DEFAULT '' COMMENT '该哨兵组适用的集群类型',
+    `deleted`             tinyint(4) NOT NULL DEFAULT '0' COMMENT '是否删除',
+    `active`             tinyint(4) NOT NULL DEFAULT '1' COMMENT '是否有效',
+    `datachange_lasttime` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP (3) COMMENT '更新时间',
+    `sentinel_description` varchar(100)  NOT NULL DEFAULT '',
+    PRIMARY KEY (`sentinel_group_id`),
+    KEY                   `ix_DataChange_LastTime` (`datachange_lasttime`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='哨兵组表';
+
+-- sentinel_tbl
+drop table if exists sentinel_tbl;
+CREATE TABLE `sentinel_tbl`
+(
+    `sentinel_id`         bigint(20) NOT NULL AUTO_INCREMENT COMMENT '哨兵id',
+    `dc_id`               bigint(20) NOT NULL DEFAULT '0' COMMENT '哨兵所在dc id',
+    `sentinel_group_id`   bigint(20) NOT NULL DEFAULT '0' COMMENT '哨兵所属group id',
+    `sentinel_ip`         varchar(40)  NOT NULL DEFAULT '0.0.0.0' COMMENT '哨兵ip',
+    `sentinel_port`       int(11) NOT NULL DEFAULT '0' COMMENT '哨兵port',
+    `deleted`             tinyint(4) NOT NULL DEFAULT '0' COMMENT '是否删除',
+    `datachange_lasttime` timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP (3) COMMENT '更新时间',
+    PRIMARY KEY (`sentinel_id`),
+    UNIQUE KEY `unniqueKey` (`sentinel_ip`,`sentinel_port`,`deleted`),
+    KEY                   `ix_DataChange_LastTime` (`datachange_lasttime`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='哨兵表';
+
+-- repl_direction_tbl
+drop table if exists repl_direction_tbl;
+CREATE TABLE `repl_direction_tbl` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `cluster_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference cluster',
+  `src_dc_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'source dc id of this direction',
+  `from_dc_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'from dc id of this direction',
+  `to_dc_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'to dc id of this direction',
+  `target_cluster_name` varchar(128) DEFAULT NULL COMMENT 'target cluster name',
+  `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'data changed last time',
+  `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  PRIMARY KEY (`id`),
+  KEY `cluster_id` (`cluster_id`),
+  KEY `DataChange_LastTime` (`DataChange_LastTime`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8 COMMENT='replication direction info';
+
+-- appliercontainer_tbl
+drop table if exists appliercontainer_tbl;
+CREATE TABLE `appliercontainer_tbl` (
+  `appliercontainer_id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `appliercontainer_dc` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference dc',
+  `appliercontainer_az` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference available zone',
+  `appliercontainer_org` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference organization',
+  `appliercontainer_ip` varchar(40) NOT NULL DEFAULT '0.0.0.0' COMMENT 'appliercontainer ip',
+  `appliercontainer_port` int(11) NOT NULL DEFAULT '0' COMMENT 'appliercontainer port',
+  `appliercontainer_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'appliercontainer active or not',
+  `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
+  `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  PRIMARY KEY (`appliercontainer_id`),
+  KEY `DataChange_LastTime` (`DataChange_LastTime`),
+  KEY `appliercontainer_dc` (`appliercontainer_dc`)
+) DEFAULT CHARSET=utf8 COMMENT='appliercontainer base info';
+
+-- applier_tbl
+drop table if exists applier_tbl;
+CREATE TABLE `applier_tbl` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'primary key',
+  `shard_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference  shard',
+  `repl_direction_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference repl direction',
+  `container_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT 'reference container',
+  `ip` varchar(40) NOT NULL DEFAULT '0.0.0.0' COMMENT 'ip',
+  `port` int(11) NOT NULL DEFAULT '0' COMMENT 'port',
+  `active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'active or not',
+  `DataChange_LastTime` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'last modified time',
+  `deleted` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'deleted or not',
+  `deleted_at` int(11) NOT NULL DEFAULT '0' COMMENT 'deleted time',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `ip_port_deleted_at` (`ip`,`port`,`deleted_at`),
+  KEY `DataChange_LastTime` (`DataChange_LastTime`),
+  KEY `shard_id` (`shard_id`),
+  KEY `active` (`active`),
+  KEY `shard_id_deleted` (`shard_id`,`deleted`)
+) DEFAULT CHARSET=utf8 COMMENT='applier base info';

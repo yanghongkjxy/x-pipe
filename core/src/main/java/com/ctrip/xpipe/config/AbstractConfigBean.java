@@ -3,11 +3,14 @@ package com.ctrip.xpipe.config;
 import com.ctrip.xpipe.api.codec.Codec;
 import com.ctrip.xpipe.api.config.Config;
 import com.ctrip.xpipe.api.config.ConfigChangeListener;
+import com.ctrip.xpipe.utils.StringUtil;
 import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
@@ -17,7 +20,7 @@ import java.util.function.Function;
  * Jul 22, 2016
  */
 public abstract class AbstractConfigBean implements ConfigChangeListener {
-	
+
 	private Config config;
 	
 	protected Logger logger = LoggerFactory.getLogger(getClass());
@@ -25,6 +28,8 @@ public abstract class AbstractConfigBean implements ConfigChangeListener {
 	private Map<String, Long> longCache;
 
 	private Map<String, Integer> intergerCache;
+
+	private Map<String, Float> floatCache;
 
 	private AtomicLong configVersion = new AtomicLong(0L);
 
@@ -73,6 +78,18 @@ public abstract class AbstractConfigBean implements ConfigChangeListener {
 		return getValueFromCache(key, Functions.TO_LONG_FUNCTION, longCache, defaultValue);
 	}
 
+	protected Float getFloatProperty(String key, Float defaultValue){
+		if (floatCache == null) {
+			synchronized (this) {
+				if (floatCache == null) {
+					floatCache = Maps.newConcurrentMap();
+				}
+			}
+		}
+
+		return getValueFromCache(key, Functions.TO_FLOAT_FUNCTION, floatCache, defaultValue);
+	}
+
 	protected Boolean getBooleanProperty(String key, Boolean defaultValue){
 		
 		String value = config.get(key);
@@ -81,6 +98,19 @@ public abstract class AbstractConfigBean implements ConfigChangeListener {
 		}
 		
 		return Boolean.parseBoolean(value.trim());
+	}
+
+	protected Set<String> getSplitStringSet(String str) {
+		HashSet result = new HashSet();
+
+		String[] split = str.split("\\s*(,|;)\\s*");
+
+		for(String sp : split){
+			if(!StringUtil.isEmpty(sp)){
+				result.add(sp);
+			}
+		}
+		return result;
 	}
 	
 	@Override
@@ -117,6 +147,7 @@ public abstract class AbstractConfigBean implements ConfigChangeListener {
 
 						if (configVersion.get() == currentConfigVersion) {
 							cache.put(key, result);
+							logger.info("[config updated] {}, {}", key, result);
 						}
 
 						return result;
@@ -134,6 +165,7 @@ public abstract class AbstractConfigBean implements ConfigChangeListener {
 		synchronized (this) {
 			intergerCache = Maps.newConcurrentMap();
 			longCache = Maps.newConcurrentMap();
+			floatCache = Maps.newConcurrentMap();
 			configVersion.getAndIncrement();
 		}
 	}
@@ -149,6 +181,12 @@ public abstract class AbstractConfigBean implements ConfigChangeListener {
 			@Override
 			public Long apply(String input) {
 				return Long.parseLong(input);
+			}
+		};
+		Function<String, Float> TO_FLOAT_FUNCTION = new Function<String, Float>() {
+			@Override
+			public Float apply(String input) {
+				return Float.parseFloat(input);
 			}
 		};
 		Function<String, Boolean> TO_BOOLEAN_FUNCTION = new Function<String, Boolean>() {

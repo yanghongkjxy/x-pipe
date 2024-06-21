@@ -4,12 +4,12 @@ import com.ctrip.xpipe.api.command.Command;
 import com.ctrip.xpipe.api.factory.ObjectFactory;
 import com.ctrip.xpipe.api.lifecycle.Destroyable;
 import com.ctrip.xpipe.utils.MapUtils;
-import org.jboss.netty.util.internal.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 
 /**
@@ -23,12 +23,12 @@ public class KeyedOneThreadTaskExecutor<K> implements Destroyable{
 	
 	private Map<K, OneThreadTaskExecutor> keyedExecutor = new ConcurrentHashMap<>();
 
-	private Executor executors;
+	protected Executor executors;
 	
 	public KeyedOneThreadTaskExecutor(Executor executors){
 		this.executors = executors;
 	}
-	
+
 	public void execute(K key, Command<?> command){
 		
 		OneThreadTaskExecutor oneThreadTaskExecutor = getOrCreate(key);
@@ -36,15 +36,19 @@ public class KeyedOneThreadTaskExecutor<K> implements Destroyable{
 	}
 
 	
-	private OneThreadTaskExecutor getOrCreate(K key) {
+	protected OneThreadTaskExecutor getOrCreate(K key) {
 		
 		return MapUtils.getOrCreate(keyedExecutor, key, new ObjectFactory<OneThreadTaskExecutor>() {
 			
 			@Override
 			public OneThreadTaskExecutor create() {
-				return new OneThreadTaskExecutor(executors);
+				return createTaskExecutor();
 			}
 		});
+	}
+
+	protected OneThreadTaskExecutor createTaskExecutor() {
+		return new OneThreadTaskExecutor(executors);
 	}
 
 	@Override

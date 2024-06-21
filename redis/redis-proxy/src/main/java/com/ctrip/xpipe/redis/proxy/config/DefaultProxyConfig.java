@@ -41,6 +41,8 @@ public class DefaultProxyConfig implements ProxyConfig {
 
     private static final String KEY_ENDPOINT_HEALTH_CHECK_INTERVAL = "proxy.endpoint.check.interval.sec";
 
+    private static final String KEY_PROXY_SOCKET_STATS_CHECK_INTERVAL = "proxy.socket.stats.check.interval.milli";
+
     private static final String KEY_TRAFFIC_REPORT_INTERVAL = "proxy.traffic.report.interval.milli";
 
     private static final String KEY_FRONTEND_TCP_PORT = "proxy.frontend.tcp.port";
@@ -62,6 +64,8 @@ public class DefaultProxyConfig implements ProxyConfig {
     private static final String KEY_PROXY_COMPRESS_ALGORITHM = "proxy.compress.algorithm";
 
     private static final String KEY_PROXY_COMPRESS_ALGORITHM_VERSION = "proxy.compress.algorithm.version";
+
+    private static final String KEY_PROXY_REPORT_TRAFFIC = "proxy.report.traffic";
 
     private ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1, XpipeThreadFactory.create("DefaultProxyConfig"));
 
@@ -116,6 +120,11 @@ public class DefaultProxyConfig implements ProxyConfig {
     }
 
     @Override
+    public int socketStatsCheckInterval() {
+        return getIntProperty(KEY_PROXY_SOCKET_STATS_CHECK_INTERVAL, 1000);
+    }
+
+    @Override
     public boolean noTlsNettyHandler() {
         return getBooleanProperty(KEY_NO_TLS_NETTY_HANDLER, false);
     }
@@ -143,7 +152,7 @@ public class DefaultProxyConfig implements ProxyConfig {
 
     @Override
     public boolean isCompressEnabled() {
-        return getBooleanProperty(KEY_PROXY_COMPRESS_ENABLED, Boolean.FALSE);
+        return getBooleanProperty(KEY_PROXY_COMPRESS_ENABLED, Boolean.TRUE);
     }
 
     @Override
@@ -159,6 +168,11 @@ public class DefaultProxyConfig implements ProxyConfig {
                 return AlgorithmType.valueOf(getProperty(KEY_PROXY_COMPRESS_ALGORITHM, AlgorithmType.ZSTD.name()));
             }
         };
+    }
+
+    @Override
+    public boolean shouldReportTraffic() {
+        return getBooleanProperty(KEY_PROXY_REPORT_TRAFFIC, false);
     }
 
     @Override

@@ -4,13 +4,25 @@
    <parent>
       <groupId>com.ctrip.framework.xpipe.redis</groupId>
       <artifactId>redis-parent</artifactId>
-      <version>1.1.0-SNAPSHOT</version>
+      <version>1.2.14</version>
    </parent>
    <artifactId>redis-console</artifactId>
    <dependencies>
       <dependency>
          <groupId>com.ctrip.framework.xpipe.redis</groupId>
          <artifactId>redis-core</artifactId>
+      </dependency>
+      <dependency>
+         <groupId>com.ctrip.framework.xpipe.redis</groupId>
+         <artifactId>redis-checker</artifactId>
+         <version>${project.version}</version>
+      </dependency>
+      <dependency>
+         <groupId>com.ctrip.framework.xpipe.redis</groupId>
+         <artifactId>redis-checker</artifactId>
+         <version>${project.version}</version>
+         <type>test-jar</type>
+         <scope>test</scope>
       </dependency>
       <dependency>
          <groupId>org.springframework.boot</groupId>
@@ -23,11 +35,6 @@
       <dependency>
          <groupId>dnsjava</groupId>
          <artifactId>dnsjava</artifactId>
-      </dependency>
-      <dependency>
-         <groupId>org.springframework.boot</groupId>
-         <artifactId>spring-boot-starter-test</artifactId>
-         <scope>test</scope>
       </dependency>
       <dependency>
          <groupId>redis.clients</groupId>
@@ -66,6 +73,13 @@
          <artifactId>h2</artifactId>
          <scope>test</scope>
       </dependency>
+      <!-- mybatis plus + ctrip dal -->
+      <dependency>
+         <groupId>com.baomidou</groupId>
+         <artifactId>mybatis-plus-boot-starter</artifactId>
+         <version>3.5.3.1</version>
+      </dependency>
+
       <!-- https://mvnrepository.com/artifact/org.apache.velocity/velocity -->
       <dependency>
          <groupId>org.springframework.boot</groupId>
@@ -91,6 +105,17 @@
       <dependency>
          <groupId>org.apache.curator</groupId>
          <artifactId>curator-test</artifactId>
+         <scope>test</scope>
+      </dependency>
+       <dependency>
+           <groupId>com.squareup.okhttp3</groupId>
+           <artifactId>mockwebserver</artifactId>
+           <scope>test</scope>
+       </dependency>
+      <dependency>
+         <groupId>com.baomidou</groupId>
+         <artifactId>mybatis-plus-generator</artifactId>
+         <version>3.5.3.1</version>
          <scope>test</scope>
       </dependency>
    </dependencies>

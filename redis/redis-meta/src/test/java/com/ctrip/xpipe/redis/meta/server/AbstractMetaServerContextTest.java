@@ -3,7 +3,7 @@ package com.ctrip.xpipe.redis.meta.server;
 import com.ctrip.xpipe.api.foundation.FoundationService;
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.DcMeta;
-import com.ctrip.xpipe.redis.core.meta.MetaClone;
+import com.ctrip.xpipe.redis.core.meta.clone.MetaCloneFacade;
 import com.ctrip.xpipe.redis.meta.server.cluster.ClusterServers;
 import com.ctrip.xpipe.redis.meta.server.cluster.CurrentClusterServer;
 import com.ctrip.xpipe.redis.meta.server.cluster.SlotManager;
@@ -47,7 +47,7 @@ public class AbstractMetaServerContextTest extends AbstractMetaServerTest{
 			startZk(zkPort);
 		}
 		
-		zkAddress = String.format("localhost:%d", zkPort);
+		zkAddress = String.format("127.0.0.1:%d", zkPort);
 		try{
 			TestZkClient client = getBean(TestZkClient.class);
 			client.setZkAddress(zkAddress);
@@ -131,7 +131,7 @@ public class AbstractMetaServerContextTest extends AbstractMetaServerTest{
 		
 		DcMeta dcMeta = getDcMeta(dc);
 		ClusterMeta clusterMeta = (ClusterMeta) dcMeta.getClusters().values().toArray()[0];
-		return MetaClone.clone(clusterMeta);
+		return MetaCloneFacade.INSTANCE.clone(clusterMeta);
 	}
 	
 	@Override

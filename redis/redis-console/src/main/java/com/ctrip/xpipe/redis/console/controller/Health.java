@@ -1,6 +1,8 @@
 package com.ctrip.xpipe.redis.console.controller;
 
 import com.ctrip.xpipe.api.cluster.CrossDcClusterServer;
+import com.ctrip.xpipe.api.foundation.FoundationService;
+import com.ctrip.xpipe.redis.console.checker.CheckerManager;
 import com.ctrip.xpipe.redis.console.cluster.ConsoleLeaderElector;
 import com.ctrip.xpipe.spring.AbstractProfile;
 import com.ctrip.xpipe.utils.IpUtils;
@@ -30,6 +32,9 @@ public class Health extends AbstractConsoleController {
     @Autowired
     private CrossDcClusterServer crossDcClusterServer;
 
+    @Autowired(required = false)
+    private CheckerManager checkerManager;
+
     @RequestMapping(value = "/health", method = RequestMethod.GET)
     public Map<String, Object> getHealthState(HttpServletRequest request, HttpServletResponse response) {
 
@@ -52,6 +57,12 @@ public class Health extends AbstractConsoleController {
         result.put("isLeader", consoleLeaderElector.amILeader());
         result.put("status", consoleLeaderElector.getAllServers());
         result.put("crossDcLeader", crossDcClusterServer.amILeader());
+        result.put("dc", FoundationService.DEFAULT.getDataCenter());
+
+        if (null != checkerManager) {
+            result.put("checker", checkerManager.getCheckers());
+        }
+
         return result;
     }
 }

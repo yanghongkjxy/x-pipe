@@ -14,7 +14,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -26,7 +26,7 @@ import static org.mockito.Mockito.when;
  *
  * Dec 12, 2016
  */
-@RunWith(MockitoJUnitRunner.class)
+@RunWith(MockitoJUnitRunner.Silent.class)
 public class BecomeBackupActionTest extends AbstractMetaServerTest{
 	
 	@Mock
@@ -50,15 +50,17 @@ public class BecomeBackupActionTest extends AbstractMetaServerTest{
 		redises.add(new RedisMeta().setIp("localhost").setPort(6379));
 		redises.add(new RedisMeta().setIp("localhost").setPort(6479));
 
-		when(dcMetaCache.getShardRedises(getClusterId(), getShardId())).thenReturn(redises);
+		when(dcMetaCache.getShardRedises(getClusterDbId(), getShardDbId())).thenReturn(redises);
 	}
 
 	@Test
 	public void test() throws Exception{
 		
-		BecomeBackupAction becomeBackupAction = new BecomeBackupAction(dcMetaCache, currentMetaManager, sentinelManager, new ExecutionLog(currentTestName()), getXpipeNettyClientKeyedObjectPool(), multiDcService, scheduled, executors);
+		BecomeBackupAction becomeBackupAction = new BecomeBackupAction(getClusterDbId(), getShardDbId(), dcMetaCache,
+				currentMetaManager, sentinelManager, new ExecutionLog(currentTestName()),
+				getXpipeNettyClientKeyedObjectPool(), multiDcService, scheduled, executors);
 		
-		PrimaryDcChangeMessage message = becomeBackupAction.changePrimaryDc(getClusterId(), getShardId(), newPrimaryDc, new MasterInfo());
+		PrimaryDcChangeMessage message = becomeBackupAction.changePrimaryDc(getClusterDbId(), getShardDbId(), newPrimaryDc, new MasterInfo());
 		
 		logger.info("{}", message);
 	}

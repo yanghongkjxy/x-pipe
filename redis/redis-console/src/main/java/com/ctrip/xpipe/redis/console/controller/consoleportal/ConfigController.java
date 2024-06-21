@@ -3,9 +3,8 @@ package com.ctrip.xpipe.redis.console.controller.consoleportal;
 import com.ctrip.xpipe.api.sso.UserInfo;
 import com.ctrip.xpipe.api.sso.UserInfoHolder;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
-import com.ctrip.xpipe.redis.console.config.impl.DefaultConsoleDbConfig;
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
-import com.ctrip.xpipe.redis.console.controller.api.RetMessage;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
 import com.ctrip.xpipe.redis.console.model.ConfigModel;
 import com.ctrip.xpipe.redis.console.service.ConfigService;
 import org.slf4j.Logger;
@@ -17,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
+
+import static com.ctrip.xpipe.redis.console.service.ConfigService.*;
 
 /**
  * @author chen.zhu
@@ -63,6 +64,15 @@ public class ConfigController extends AbstractConsoleController{
         }
     }
 
+    @RequestMapping(value = "/config/keeper_balance_info_collect", method = RequestMethod.GET)
+    public RetMessage isKeeperBalanceInfoCollectOn() {
+        if(configService.isKeeperBalanceInfoCollectOn()) {
+            return RetMessage.createSuccessMessage();
+        } else {
+            return RetMessage.createFailMessage("closed");
+        }
+    }
+
     private RetMessage changeConfig(final String key, final String val, final String uri) {
         UserInfo user = UserInfoHolder.DEFAULT.getUser();
         String userId = user.getUserId();
@@ -72,19 +82,25 @@ public class ConfigController extends AbstractConsoleController{
         logger.info("[changeConfig] Config changed by user: {} and ip: {}", userId, uri);
         try {
             boolean target = Boolean.parseBoolean(val);
-            if(DefaultConsoleDbConfig.KEY_ALERT_SYSTEM_ON.equalsIgnoreCase(key)) {
+            if(KEY_ALERT_SYSTEM_ON.equalsIgnoreCase(key)) {
                 if(target) {
                     configService.startAlertSystem(configModel);
                 } else {
                     configService.stopAlertSystem(configModel, consoleConfig.getConfigDefaultRestoreHours());
                 }
-            } else if(DefaultConsoleDbConfig.KEY_SENTINEL_AUTO_PROCESS.equalsIgnoreCase(key)) {
+            } else if(KEY_SENTINEL_AUTO_PROCESS.equalsIgnoreCase(key)) {
                 if(target) {
                     configService.startSentinelAutoProcess(configModel);
                 } else {
                     configService.stopSentinelAutoProcess(configModel, consoleConfig.getConfigDefaultRestoreHours());
                 }
-            } else {
+            } else if(KEY_KEEPER_BALANCE_INFO_COLLECT.equalsIgnoreCase(key)) {
+                if(target) {
+                    configService.startKeeperBalanceInfoCollect(configModel, consoleConfig.getConfigDefaultRestoreHours());
+                } else {
+                    configService.stopKeeperBalanceInfoCollect(configModel);
+                }
+            }else {
                 return RetMessage.createFailMessage("Unknown config key: " + key);
             }
             return RetMessage.createSuccessMessage();

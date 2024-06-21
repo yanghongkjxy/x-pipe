@@ -11,15 +11,17 @@ import com.ctrip.xpipe.redis.core.protocal.Psync;
 import com.ctrip.xpipe.redis.core.protocal.PsyncObserver;
 import com.ctrip.xpipe.redis.core.protocal.RedisClientProtocol;
 import com.ctrip.xpipe.redis.core.protocal.RedisProtocol;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser.BulkStringParserListener;
+import com.ctrip.xpipe.redis.core.protocal.protocal.AbstractBulkStringParser.BulkStringParserListener;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
+import com.ctrip.xpipe.redis.core.protocal.protocal.RdbBulkStringParser;
 import com.ctrip.xpipe.redis.core.protocal.protocal.RequestStringParser;
 import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.ChannelUtil;
+import com.ctrip.xpipe.utils.CloseState;
 import com.ctrip.xpipe.utils.StringUtil;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
+import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
 import java.util.LinkedList;
@@ -35,7 +37,7 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 
 	private boolean saveCommands;
 
-	private BulkStringParser rdbReader;
+	private RdbBulkStringParser rdbReader;
 	
 	private String replIdRequest;
 	private long offsetRequest;
@@ -47,6 +49,8 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 	protected List<PsyncObserver> observers = new LinkedList<PsyncObserver>();
 
 	protected PSYNC_STATE psyncState = PSYNC_STATE.PSYNC_COMMAND_WAITING_REPONSE;
+
+	private final CloseState closeState = new CloseState();
 
 	public AbstractPsync(String host, int port, boolean saveCommands, ScheduledExecutorService scheduled) {
 		super(host, port, scheduled);
@@ -105,8 +109,8 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 		}
 		RequestStringParser requestString = new RequestStringParser(getName(), replIdRequest,
 				String.valueOf(offsetRequest));
-		if (logger.isDebugEnabled()) {
-			logger.debug("[doRequest]{}, {}", this, StringUtil.join(" ", requestString.getPayload()));
+		if (getLogger().isDebugEnabled()) {
+			getLogger().debug("[doRequest]{}, {}", this, StringUtil.join(" ", requestString.getPayload()));
 		}
 		return requestString.format();
 	}
@@ -122,55 +126,63 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 
 	@Override
 	protected Object doReceiveResponse(Channel channel, ByteBuf byteBuf) throws Exception {
-		
-		switch (psyncState) {
+		while(true) {
+			switch (psyncState) {
 
-		case PSYNC_COMMAND_WAITING_REPONSE:
-			Object response = super.doReceiveResponse(channel, byteBuf);
-			if (response == null) {
-				return null;
-			}
-			handleRedisResponse(channel, (String) response);
-			break;
+				case PSYNC_COMMAND_WAITING_REPONSE:
+					Object response = super.doReceiveResponse(channel, byteBuf);
+					if (response == null) {
+						return null;
+					}
+					handleRedisResponse(channel, (String) response);
+					break;
 
-		case READING_RDB:
+				case READING_RDB:
 
-			if (rdbReader == null) {
-				logger.info("[doReceiveResponse][createRdbReader]{}", ChannelUtil.getDesc(channel));
-				rdbReader = createRdbReader();
-				rdbReader.setBulkStringParserListener(this);
+					if (rdbReader == null) {
+						getLogger().info("[doReceiveResponse][createRdbReader]{}", ChannelUtil.getDesc(channel));
+						rdbReader = createRdbReader();
+						rdbReader.setBulkStringParserListener(this);
+					}
+
+					RedisClientProtocol<InOutPayload> payload = rdbReader.read(byteBuf);
+					if (payload != null) {
+						psyncState = PSYNC_STATE.READING_COMMANDS;
+						if (!saveCommands) {
+							future().setSuccess();
+						}
+						endReadRdb();
+						break;
+					} else {
+						break;
+					}
+				case READING_COMMANDS:
+					if (saveCommands) {
+						synchronized (closeState) {
+							if (!closeState.isOpen()) {
+								getLogger().info("[doHandleResponse][psync already closed]{}", channel);
+								throw new IllegalStateException("psync already closed");
+							}
+							try {
+								appendCommands(byteBuf);
+							} catch (IOException e) {
+								getLogger().error("[doHandleResponse][write commands error]" + this, e);
+							}
+						}
+					}
+					break;
+				default:
+					throw new IllegalStateException("unknown state:" + psyncState);
 			}
 
-			RedisClientProtocol<InOutPayload> payload = rdbReader.read(byteBuf);
-			if (payload != null) {
-				psyncState = PSYNC_STATE.READING_COMMANDS;
-				if (!saveCommands) {
-					future().setSuccess();
-				}
-				endReadRdb();
-			} else {
-				break;
-			}
-		case READING_COMMANDS:
-			if (saveCommands) {
-				try {
-					appendCommands(byteBuf);
-				} catch (IOException e) {
-					logger.error("[doHandleResponse][write commands error]" + this, e);
-				}
-			}
-			break;
-		default:
-			throw new IllegalStateException("unknown state:" + psyncState);
+			return null;
 		}
-
-		return null;
 	}
 
 	protected void handleRedisResponse(Channel channel, String psync) throws IOException {
 
-		if (logger.isInfoEnabled()) {
-			logger.info("[handleRedisResponse]{}, {}, {}", ChannelUtil.getDesc(channel), this, psync);
+		if (getLogger().isInfoEnabled()) {
+			getLogger().info("[handleRedisResponse]{}, {}, {}", ChannelUtil.getDesc(channel), this, psync);
 		}
 		String[] split = splitSpace(psync);
 		if (split.length == 0) {
@@ -183,7 +195,7 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 			}
 			replId = split[1];
 			masterRdbOffset = Long.parseLong(split[2]);
-			logger.debug("[readRedisResponse]{}, {}, {}, {}", ChannelUtil.getDesc(channel), this, replId,
+			getLogger().debug("[readRedisResponse]{}, {}, {}, {}", ChannelUtil.getDesc(channel), this, replId,
 					masterRdbOffset);
 			psyncState = PSYNC_STATE.READING_RDB;
 
@@ -196,7 +208,12 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 			if(split.length >= 2 && split[1].length() == RedisProtocol.RUN_ID_LENGTH){
 				newReplId = split[1];
 			}
-			doOnContinue(newReplId);
+			if (split.length >= 3 && StringUtils.isNumeric(split[2])) {
+				long continueOffset = Long.parseLong(split[2]);
+				doOnKeeperContinue(newReplId, continueOffset);
+			} else {
+				doOnContinue(newReplId);
+			}
 		} else {
 			throw new RedisRuntimeException("unknown reply:" + psync);
 		}
@@ -204,34 +221,34 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 
 	protected void endReadRdb() {
 
-		logger.info("[endReadRdb]");
+		getLogger().info("[endReadRdb]");
 		for (PsyncObserver observer : observers) {
 			try {
 				observer.endWriteRdb();
 			} catch (Throwable th) {
-				logger.error("[endReadRdb]" + this, th);
+				getLogger().error("[endReadRdb]" + this, th);
 			}
 		}
 	}
 
 	protected abstract void appendCommands(ByteBuf byteBuf) throws IOException;
 
-	protected abstract BulkStringParser createRdbReader();
+	protected abstract RdbBulkStringParser createRdbReader();
 
 	protected void doOnFullSync() throws IOException {
-		logger.debug("[doOnFullSync]");
+		getLogger().debug("[doOnFullSync]");
 		notifyFullSync();
 	}
 
 	private void notifyFullSync() {
-		logger.debug("[notifyFullSync]");
+		getLogger().debug("[notifyFullSync]");
 		for (PsyncObserver observer : observers) {
-			observer.onFullSync();
+			observer.onFullSync(masterRdbOffset);
 		}
 	}
 	
 	protected void doOnContinue(String newReplId) throws IOException{
-		logger.debug("[doOnContinue]{}",newReplId);
+		getLogger().debug("[doOnContinue]{}",newReplId);
 		notifyContinue(newReplId);
 	}
 
@@ -242,6 +259,17 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 		}
 	}
 
+	protected void doOnKeeperContinue(String replId, long continueOffset) throws IOException {
+		getLogger().debug("[doOnKeeperContinue]{}:{}", replId, continueOffset);
+		notifyKeeperContinue(replId, continueOffset);
+	}
+
+	protected void notifyKeeperContinue(String replId, long beginOffset) {
+		for (PsyncObserver observer : observers) {
+			observer.onKeeperContinue(replId, beginOffset);
+		}
+	}
+
 	@Override
 	public void onEofType(EofType eofType) {
 		beginReadRdb(eofType);
@@ -249,13 +277,13 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 
 	protected void beginReadRdb(EofType eofType) {
 
-		logger.info("[beginReadRdb]{}, eof:{}", this, eofType);
+		getLogger().info("[beginReadRdb]{}, eof:{}", this, eofType);
 
 		for (PsyncObserver observer : observers) {
 			try {
-				observer.beginWriteRdb(eofType, masterRdbOffset);
+				observer.beginWriteRdb(eofType, replId, masterRdbOffset);
 			} catch (Throwable th) {
-				logger.error("[beginReadRdb]" + this, th);
+				getLogger().error("[beginReadRdb]" + this, th);
 			}
 		}
 	}
@@ -280,5 +308,15 @@ public abstract class AbstractPsync extends AbstractRedisCommand<Object> impleme
 	@Override
 	protected void doReset() {
 		throw new UnsupportedOperationException("not supported");
+	}
+
+	@Override
+	public void close() {
+		if (!this.closeState.isOpen()) return;
+
+		this.closeState.setClosing();
+		synchronized (closeState) {
+			this.closeState.setClosed();
+		}
 	}
 }

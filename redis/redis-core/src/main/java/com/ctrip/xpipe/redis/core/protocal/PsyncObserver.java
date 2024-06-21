@@ -1,8 +1,10 @@
 package com.ctrip.xpipe.redis.core.protocal;
 
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
+import com.ctrip.xpipe.redis.core.store.RdbStore;
 
 import java.io.IOException;
+import java.util.Map;
 
 /**
  * @author wenchao.meng
@@ -13,8 +15,9 @@ public interface PsyncObserver {
 	
 	/**
 	 * get FULLSYNC response
+	 * @param masterRdbOffset
 	 */
-	void onFullSync();
+	void onFullSync(long masterRdbOffset);
 
 	void reFullSync();
 
@@ -24,10 +27,14 @@ public interface PsyncObserver {
 	 * @param offset
 	 * @throws IOException
 	 */
-	void beginWriteRdb(EofType eofType, long masterRdbOffset) throws IOException;
+	void beginWriteRdb(EofType eofType, String replId, long masterRdbOffset) throws IOException;
 
+	void readAuxEnd(RdbStore rdbStore, Map<String, String> auxMap);
 
 	void endWriteRdb();
 	
 	void onContinue(String requestReplId, String responseReplId);
+
+	void onKeeperContinue(String replId, long beginOffset);
+
 }

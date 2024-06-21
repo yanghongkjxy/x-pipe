@@ -271,8 +271,10 @@ public class DefaultTunnel extends AbstractLifecycleObservable implements Tunnel
         }
     }
 
-    private void addCompressOptionToProtocolIfNeeded() {
-        if(config.isCompressEnabled()) {
+    @VisibleForTesting
+    protected void addCompressOptionToProtocolIfNeeded() {
+        if(config.isCompressEnabled() && protocol.isNextHopProxy()) {
+            logger.info("Content Compress add to protocol:{}", protocol.toString());
             protocol.addCompression(config.getCompressAlgorithm());
         }
     }
@@ -322,7 +324,7 @@ public class DefaultTunnel extends AbstractLifecycleObservable implements Tunnel
         public void onInit() {
             frontend.markUnReadable();
             ChannelPipeline pipeline = frontend.getChannel().pipeline();
-            pipeline.addLast(new SessionTrafficReporter(config.getTrafficReportIntervalMillis(), frontend));
+            pipeline.addLast(new SessionTrafficReporter(config.getTrafficReportIntervalMillis(), config::shouldReportTraffic, frontend));
             installCompressCodecIfNecessary(pipeline);
             pipeline.addLast(new FrontendSessionNettyHandler(DefaultTunnel.this));
         }

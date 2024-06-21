@@ -24,10 +24,10 @@ import java.util.List;
 public class DcClusterDao extends AbstractXpipeConsoleDAO{
 	private DcClusterTblDao dcClusterTblDao;
 	private DcClusterShardTblDao dcClusterShardTblDao;
-	
+
 	@Autowired
 	private DcClusterShardDao dcClusterShardDao;
-	
+
 	@PostConstruct
 	private void postConstruct() {
 		try {
@@ -40,7 +40,7 @@ public class DcClusterDao extends AbstractXpipeConsoleDAO{
 	
 	@DalTransaction
 	public void deleteDcClustersBatch(List<DcClusterTbl> dcClusters) throws DalException {
-		if(null == dcClusters || !dcClusters.isEmpty()) {
+		if(null == dcClusters || dcClusters.isEmpty()) {
 			logger.warn("[deleteDcClustersBatch] Empty dcClusters list: {}", dcClusters);
 			return;
 		}
@@ -91,7 +91,5 @@ public class DcClusterDao extends AbstractXpipeConsoleDAO{
 				return dcClusterTblDao.deleteBatch(dcCluster, DcClusterTblEntity.UPDATESET_FULL);
 			}
 		}, true);
-
 	}
-	
 }

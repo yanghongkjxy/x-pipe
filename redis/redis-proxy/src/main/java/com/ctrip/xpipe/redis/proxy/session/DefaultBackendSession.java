@@ -1,6 +1,7 @@
 package com.ctrip.xpipe.redis.proxy.session;
 
 import com.ctrip.xpipe.api.monitor.EventMonitor;
+import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.proxy.ProxyEndpoint;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.ProxyEndpointSelector;
 import com.ctrip.xpipe.redis.core.proxy.handler.NettySslHandlerFactory;
@@ -25,6 +26,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.concurrent.TimeUnit;
@@ -39,12 +41,16 @@ import static com.ctrip.xpipe.redis.proxy.DefaultProxyServer.WRITE_LOW_WATER_MAR
  * May 24, 2018
  */
 public class DefaultBackendSession extends AbstractSession implements BackendSession {
+    private static LoggingHandler loggingHandler = new LoggingHandler(LogLevel.DEBUG);
 
-    private static final String BACKEND_SESSION_HANDLER = "backendSessionHandler";
+    @VisibleForTesting
+    static final String BACKEND_SESSION_HANDLER = "backendSessionHandler";
 
-    private static final String BACKEND_COMPRESS_DECODER = "backendCompressDecoder";
+    @VisibleForTesting
+    static final String BACKEND_COMPRESS_DECODER = "backendCompressDecoder";
 
-    private static final String BACKEND_COMPRESS_ENCODER = "backendCompressEncoder";
+    @VisibleForTesting
+    static final String BACKEND_COMPRESS_ENCODER = "backendCompressEncoder";
 
     private ProxyEndpointSelector selector;
 
@@ -78,7 +84,6 @@ public class DefaultBackendSession extends AbstractSession implements BackendSes
             this.endpoint = selector.nextHop();
         } catch (Exception e) {
             setSessionState(new SessionClosed(this));
-            logger.error("[connect] select nextHop error", e);
             throw e;
         }
         ChannelFuture connectionFuture = initChannel(endpoint);
@@ -90,7 +95,12 @@ public class DefaultBackendSession extends AbstractSession implements BackendSes
                 } else {
                     logger.error("[tryConnect] fail to connect: {}, {}", getSessionMeta(), future.cause());
                     future.channel().eventLoop()
-                            .schedule(()->connect(), selector.selectCounts(), TimeUnit.MILLISECONDS);
+                            .schedule(new AbstractExceptionLogTask() {
+                                @Override
+                                protected void doRun() throws Exception {
+                                    connect();
+                                }
+                            }, selector.selectCounts(), TimeUnit.MILLISECONDS);
                 }
             }
         });
@@ -113,8 +123,8 @@ public class DefaultBackendSession extends AbstractSession implements BackendSes
                         if(endpoint.isSslEnabled()) {
                             p.addLast(sslHandlerFactory.createSslHandler(ch));
                         }
-                        p.addLast(new LoggingHandler(LogLevel.DEBUG));
-                        p.addLast(new SessionTrafficReporter(trafficReportIntervalMillis, DefaultBackendSession.this));
+                        p.addLast(loggingHandler);
+                        p.addLast(new SessionTrafficReporter(trafficReportIntervalMillis, config::shouldReportTraffic, DefaultBackendSession.this));
                         p.addLast(BACKEND_SESSION_HANDLER, new BackendSessionHandler(tunnel()));
                     }
                 });
@@ -137,7 +147,7 @@ public class DefaultBackendSession extends AbstractSession implements BackendSes
             getChannel().writeAndFlush(tunnel().getProxyProtocol().output());
         }
         ProxyConfig config = resourceManager.getProxyConfig();
-        if(config.isCompressEnabled()) {
+        if(config.isCompressEnabled() && tunnel().getProxyProtocol().isNextHopProxy()) {
             logger.info("Backend compress codec installed: {}", ChannelUtil.getDesc(channel));
             channel.pipeline().addBefore(BACKEND_SESSION_HANDLER, BACKEND_COMPRESS_DECODER, config.getCompressDecoder());
             channel.pipeline().addBefore(BACKEND_SESSION_HANDLER, BACKEND_COMPRESS_ENCODER, config.getCompressEncoder());
@@ -168,11 +178,11 @@ public class DefaultBackendSession extends AbstractSession implements BackendSes
     protected void doSetSessionState(SessionState newState) {
         SessionState oldState = this.sessionState.getAndSet(newState);
         if(oldState.equals(newState)) {
-            logger.debug("[setSessionState] already session state: {}", oldState);
+            logger.debug("[setSessionState][Backend] already session state: {}", oldState);
         } else {
-            logger.info("[setSessionState] Session state change from {} to {} ({})", oldState, newState, getSessionMeta());
-            EventMonitor.DEFAULT.logEvent(SESSION_STATE_CHANGE, String.format("%s -> %s(%s)",
-                    oldState.toString(), newState.toString(), ChannelUtil.getDesc(getChannel())));
+            logger.info("[setSessionState][Backend] Session state change from {} to {} ({})", oldState, newState, getSessionMeta());
+            EventMonitor.DEFAULT.logEvent(SESSION_STATE_CHANGE, String.format("[Backend]%s->%s", oldState.toString(), newState.toString()),
+                    Collections.singletonMap("channel", ChannelUtil.getDesc(getChannel())));
             notifyObservers(new SessionStateChangeEvent(oldState, newState));
         }
     }

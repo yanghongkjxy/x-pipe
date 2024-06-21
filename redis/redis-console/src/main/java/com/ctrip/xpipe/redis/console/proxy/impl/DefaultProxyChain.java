@@ -1,9 +1,14 @@
 package com.ctrip.xpipe.redis.console.proxy.impl;
 
+import com.ctrip.xpipe.redis.checker.model.ProxyTunnelInfo;
+import com.ctrip.xpipe.redis.checker.model.TunnelStatsInfo;
 import com.ctrip.xpipe.redis.console.proxy.ProxyChain;
-import com.ctrip.xpipe.redis.console.proxy.TunnelInfo;
+import com.ctrip.xpipe.redis.core.proxy.monitor.TunnelStatsResult;
+import com.google.common.collect.Lists;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 public class DefaultProxyChain implements ProxyChain {
@@ -14,33 +19,112 @@ public class DefaultProxyChain implements ProxyChain {
 
     private String shardId;
 
-    private List<TunnelInfo> tunnelInfos;
+    private String peerDcId;
 
-    public DefaultProxyChain(String backupDcId, String clusterId, String shardId, List<TunnelInfo> tunnelInfos) {
+    private List<DefaultTunnelInfo> tunnelInfos;
+
+    private static final Logger logger = LoggerFactory.getLogger(DefaultProxyChain.class);
+
+    public DefaultProxyChain() {
+    }
+
+    public DefaultProxyChain(String backupDcId, String clusterId, String shardId, String peerDcId, List<DefaultTunnelInfo> tunnelInfos) {
         this.backupDcId = backupDcId;
         this.clusterId = clusterId;
         this.shardId = shardId;
+        this.peerDcId = peerDcId;
         this.tunnelInfos = tunnelInfos;
     }
 
     @Override
-    public String getBackupDc() {
+    public String getBackupDcId() {
         return backupDcId;
     }
 
     @Override
-    public String getCluster() {
+    public String getClusterId() {
         return clusterId;
     }
 
     @Override
-    public String getShard() {
-        return shardId;
+    public String getShardId() { return shardId; }
+
+    @Override
+    public String getPeerDcId() {return peerDcId;}
+
+    @Override
+    public List<DefaultTunnelInfo> getTunnelInfos() {
+        return tunnelInfos;
+    }
+
+    public DefaultProxyChain setBackupDcId(String backupDcId) {
+        this.backupDcId = backupDcId;
+        return this;
+    }
+
+    public DefaultProxyChain setClusterId(String clusterId) {
+        this.clusterId = clusterId;
+        return this;
+    }
+
+    public DefaultProxyChain setShardId(String shardId) {
+        this.shardId = shardId;
+        return this;
+    }
+
+    public DefaultProxyChain setPeerDcId(String peerDcId) {
+        this.peerDcId = peerDcId;
+        return this;
+    }
+
+    public DefaultProxyChain setTunnelInfos(List<DefaultTunnelInfo> tunnelInfos) {
+        this.tunnelInfos = tunnelInfos;
+        return this;
     }
 
     @Override
-    public List<TunnelInfo> getTunnels() {
-        return tunnelInfos;
+    public ProxyTunnelInfo buildProxyTunnelInfo() {
+        ProxyTunnelInfo proxyTunnelInfo = new ProxyTunnelInfo();
+        List<TunnelStatsInfo> tunnelStatsInfos = new ArrayList<>();
+
+        tunnelInfos.forEach(tunnelInfo -> {
+            TunnelStatsResult statsResult = tunnelInfo.getTunnelStatsResult();
+            if (null == statsResult) {
+                logger.info("[buildProxyTunnelInfo] tunnel miss stats {}", tunnelInfo);
+                return;
+            }
+
+            TunnelStatsInfo tunnelStatsInfo = new TunnelStatsInfo();
+            tunnelStatsInfo.setBackend(statsResult.getBackend())
+                    .setFrontend(statsResult.getFrontend())
+                    .setTunnelId(statsResult.getTunnelId())
+                    .setProxyHost(tunnelInfo.getProxyModel().getHostPort());
+
+            tunnelStatsInfos.add(tunnelStatsInfo);
+        });
+
+        proxyTunnelInfo.setBackupDcId(backupDcId).setClusterId(clusterId)
+                .setShardId(shardId).setTunnelStatsInfos(tunnelStatsInfos);
+        return proxyTunnelInfo;
+    }
+
+    @Override
+    public DefaultProxyChain clone() {
+        DefaultProxyChain clone = new DefaultProxyChain();
+        clone.peerDcId = this.peerDcId;
+        clone.backupDcId = this.backupDcId;
+        clone.clusterId = this.clusterId;
+        clone.shardId = this.shardId;
+
+        if (null != this.tunnelInfos) {
+            List<DefaultTunnelInfo> cloneTunnelInfos = Lists.newArrayList();
+            for (DefaultTunnelInfo tunnelInfo: this.tunnelInfos) {
+                cloneTunnelInfos.add(tunnelInfo.clone());
+            }
+            clone.tunnelInfos = cloneTunnelInfos;
+        }
+
+        return clone;
     }
 
     @Override
@@ -49,7 +133,8 @@ public class DefaultProxyChain implements ProxyChain {
                 "backupDcId='" + backupDcId + '\'' +
                 ", clusterId='" + clusterId + '\'' +
                 ", shardId='" + shardId + '\'' +
-                ", tunnelInfos=" + Arrays.deepToString(tunnelInfos.toArray(new TunnelInfo[0])) +
+                ", peerDcId='" + peerDcId + '\'' +
+                ", tunnelInfos=" + tunnelInfos +
                 '}';
     }
 }

@@ -6,7 +6,7 @@ package com.ctrip.xpipe.redis.core.store;
  * Dec 25, 2016
  */
 public interface RdbStoreListener {
-	
+
 	void onEndRdb();
 
 }

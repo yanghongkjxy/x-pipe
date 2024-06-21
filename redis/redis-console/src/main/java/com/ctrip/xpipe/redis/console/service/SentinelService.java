@@ -1,24 +1,27 @@
 package com.ctrip.xpipe.redis.console.service;
 
-import com.ctrip.xpipe.redis.console.model.SentinelUsageModel;
-import com.ctrip.xpipe.redis.console.model.SetinelTbl;
+import com.ctrip.xpipe.redis.console.model.SentinelTbl;
 
 import java.util.List;
-import java.util.Map;
 
 public interface SentinelService {
+	List<SentinelTbl> findAll();
 
-	List<SetinelTbl> findAllByDcName(String dcName);
+	List<SentinelTbl> findAllWithDcName();
 
-	Map<Long, List<SetinelTbl>>   allSentinelsByDc();
+	List<SentinelTbl> findAllByDcName(String dcName);
 
-	Map<Long, SetinelTbl>   eachRandomSentinelByDc();
+	List<SentinelTbl> findBySentinelGroupId(long sentinelGroupId);
 
-	SetinelTbl find(long id);
+	List<SentinelTbl> findBySentinelGroupIdDeleted(long sentinelGroupId);
 
-	Map<Long, SetinelTbl> findByShard(long shardId);
+	SentinelTbl findByIpPort(String ip,int port);
 
-	SetinelTbl insert(SetinelTbl setinelTbl);
+	SentinelTbl insert(SentinelTbl sentinelTbl);
 
-	Map<String, SentinelUsageModel> getAllSentinelsUsage();
+	void updateByPk(SentinelTbl sentinelTbl);
+
+	void delete(long id);
+
+	void reheal(long id);
 }

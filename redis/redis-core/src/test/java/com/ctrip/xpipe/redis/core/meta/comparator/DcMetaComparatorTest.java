@@ -4,7 +4,7 @@ import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.DcMeta;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.core.entity.ShardMeta;
-import com.ctrip.xpipe.redis.core.meta.MetaClone;
+import com.ctrip.xpipe.redis.core.meta.clone.MetaCloneFacade;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -22,7 +22,7 @@ public class DcMetaComparatorTest extends AbstractComparatorTest{
 	public void beforeDcMetaComparatorTest(){
 		
 		current = getDc();
-		future = MetaClone.clone(current);
+		future = MetaCloneFacade.INSTANCE.clone(current);
 	}
 	
 	@Test
@@ -54,6 +54,7 @@ public class DcMetaComparatorTest extends AbstractComparatorTest{
 	protected ClusterMeta differentCluster(DcMeta current) {
 		ClusterMeta result = new ClusterMeta();
 		result.setId(randomString());
+		result.setDbId(Math.abs(randomLong()));
 		return result;
 	}
 
@@ -122,7 +123,26 @@ public class DcMetaComparatorTest extends AbstractComparatorTest{
 		logger.debug("{}", dcMetaComparator);
 	}
 
+	@Test
+	public void testClusterNameChange() {
+		ClusterMeta clusterMeta = future.getClusters().values().iterator().next();
+		Long clusterDbId = clusterMeta.getDbId();
+		clusterMeta.setId(randomString(10));
+		DcMetaComparator dcMetaComparator = new DcMetaComparator(current, future);
+		dcMetaComparator.compare();
 
+		Assert.assertEquals(0, dcMetaComparator.getAdded().size());
+		Assert.assertEquals(0, dcMetaComparator.getRemoved().size());
+		Assert.assertEquals(1, dcMetaComparator.getMofified().size());
+
+		ClusterMetaComparator comparator = (ClusterMetaComparator)  dcMetaComparator.getMofified().iterator().next();
+		Assert.assertEquals(comparator.getCurrent().getDbId(), clusterDbId);
+		Assert.assertEquals(comparator.getFuture().getDbId(), clusterDbId);
+		Assert.assertNotEquals(comparator.getCurrent().getId(), comparator.getFuture().getId());
+		Assert.assertEquals(0, comparator.getAdded().size());
+		Assert.assertEquals(0, comparator.getRemoved().size());
+		Assert.assertEquals(0, comparator.getMofified().size());
+	}
 
 
 }

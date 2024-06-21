@@ -1,6 +1,7 @@
 package com.ctrip.xpipe.redis.console.migration.status.migration.statemachine;
 
 import com.ctrip.xpipe.redis.console.migration.model.ClusterStepResult;
+import com.ctrip.xpipe.redis.console.migration.model.MigrationShard;
 import com.ctrip.xpipe.redis.console.migration.model.ShardMigrationStep;
 import com.ctrip.xpipe.redis.console.migration.status.migration.AbstractMigrationStateTest;
 import com.ctrip.xpipe.redis.console.migration.status.migration.MigrationAbortedState;
@@ -9,9 +10,10 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.concurrent.TimeoutException;
+
 import static org.mockito.Matchers.isA;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * @author wenchao.meng
@@ -28,13 +30,18 @@ public class StateMachineTest extends AbstractMigrationStateTest{
     }
 
     @Test
-    public void testProcessOnce(){
+    public void testProcessOnce() throws Exception {
 
         migrationCheckingState.getStateActionState().tryAction();
 
-        migrationCluster.getMigrationShards().forEach(migrationShard -> {
-            verify(migrationShard).doCheck();
-        });
+        for (MigrationShard migrationShard: migrationCluster.getMigrationShards()) {
+            waitConditionUntilTimeOut(() ->
+                mockingDetails(migrationShard)
+                        .getInvocations().stream()
+                        .filter(invocation -> invocation.getMethod().getName().equals("doCheck"))
+                        .count() == 1
+            );
+        }
 
         migrationCheckingState.getStateActionState().tryAction();
         migrationCluster.getMigrationShards().forEach(migrationShard -> {
@@ -60,14 +67,14 @@ public class StateMachineTest extends AbstractMigrationStateTest{
     }
 
     @Test
-    public void testTimeout(){
+    public void testTimeout() throws TimeoutException {
 
         int timeoutMilli = 100;
         migrationCheckingState.setMigrationWaitTimeMilli(timeoutMilli);
 
         migrationCheckingState.getStateActionState().tryAction();
 
-        sleep(timeoutMilli * 2);
+        waitConditionUntilTimeOut(()->migrationCheckingState.getStateActionState() instanceof Done, timeoutMilli * 2);
         Assert.assertTrue(migrationCheckingState.getStateActionState() instanceof Done);
     }
 

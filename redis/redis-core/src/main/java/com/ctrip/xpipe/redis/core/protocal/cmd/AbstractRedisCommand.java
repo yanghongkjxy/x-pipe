@@ -1,21 +1,23 @@
 package com.ctrip.xpipe.redis.core.protocal.cmd;
 
 import com.ctrip.xpipe.api.codec.Codec;
-import com.ctrip.xpipe.api.endpoint.Endpoint;
 import com.ctrip.xpipe.api.payload.InOutPayload;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
-import com.ctrip.xpipe.api.proxy.ProxyEnabled;
 import com.ctrip.xpipe.netty.commands.AbstractNettyRequestResponseCommand;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.payload.ByteArrayOutputStreamPayload;
+import com.ctrip.xpipe.payload.DirectByteBufInStringOutPayload;
+import com.ctrip.xpipe.payload.InOutPayloadFactory;
 import com.ctrip.xpipe.redis.core.exception.RedisRuntimeException;
 import com.ctrip.xpipe.redis.core.protocal.LoggableRedisCommand;
 import com.ctrip.xpipe.redis.core.protocal.RedisClientProtocol;
 import com.ctrip.xpipe.redis.core.protocal.protocal.*;
 import com.ctrip.xpipe.utils.StringUtil;
+import com.google.common.collect.Maps;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 
+import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -24,16 +26,21 @@ import java.util.concurrent.ScheduledExecutorService;
  * 2016年3月24日 下午12:04:13
  */
 public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestResponseCommand<T> implements LoggableRedisCommand<T> {
-	
-	public static int DEFAULT_REDIS_COMMAND_TIME_OUT_MILLI = Integer.parseInt(System.getProperty("DEFAULT_REDIS_COMMAND_TIME_OUT_SECONDS", "500"));
 
-	public static int PROXYED_REDIS_CONNECTION_COMMAND_TIME_OUT_MILLI = Integer.parseInt(System.getProperty("PROXYED_REDIS_COMMAND_TIME_OUT_SECONDS", "5000"));
+	// consider TCP-retransmit 200ms + 400ms
+	public static int DEFAULT_REDIS_COMMAND_TIME_OUT_MILLI = Integer.parseInt(System.getProperty("DEFAULT_REDIS_COMMAND_TIME_OUT_SECONDS", "660"));
+
+	public static String KEY_PROXYED_REDIS_COMMAND_TIME_OUT_MILLI = "PROXYED_REDIS_COMMAND_TIME_OUT_MILLI";
+
+	public static int PROXYED_REDIS_CONNECTION_COMMAND_TIME_OUT_MILLI = Integer.parseInt(System.getProperty(KEY_PROXYED_REDIS_COMMAND_TIME_OUT_MILLI, "5000"));
 
 	private int commandTimeoutMilli = DEFAULT_REDIS_COMMAND_TIME_OUT_MILLI;
 
 	private boolean logResponse = true;
 
 	private boolean logRequest = true;
+
+	protected InOutPayloadFactory inOutPayloadFactory;
 
 	public AbstractRedisCommand(String host, int port, ScheduledExecutorService scheduled){
 		super(host, port, scheduled);
@@ -95,10 +102,14 @@ public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestRespon
 						redisClientProtocol = new RedisErrorParser();
 						break;
 					case RedisClientProtocol.ASTERISK_BYTE:
-						redisClientProtocol = new ArrayParser();
+						redisClientProtocol = new ArrayParser().setInOutPayloadFactory(inOutPayloadFactory);
 						break;
 					case RedisClientProtocol.DOLLAR_BYTE:
-						redisClientProtocol = new BulkStringParser(getBulkStringPayload());
+						if(inOutPayloadFactory != null) {
+							redisClientProtocol = new CommandBulkStringParser(inOutPayloadFactory.create());
+						} else {
+							redisClientProtocol = new CommandBulkStringParser(getBulkStringPayload());
+						}
 						break;
 					case RedisClientProtocol.COLON_BYTE:
 						redisClientProtocol = new LongParser();
@@ -151,15 +162,18 @@ public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestRespon
 
 		if(payload instanceof String){
 			
-			logger.debug("[payloadToString]{}", payload);
+			getLogger().debug("[payloadToString]{}", payload);
 			return (String)payload;
 		}
 		if(payload instanceof ByteArrayOutputStreamPayload){
 			
 			ByteArrayOutputStreamPayload baous = (ByteArrayOutputStreamPayload) payload;
 			String result = new String(baous.getBytes(), Codec.defaultCharset); 
-			logger.debug("[payloadToString]{}", result);
+			getLogger().debug("[payloadToString]{}", result);
 			return result;
+		}
+		if(payload instanceof DirectByteBufInStringOutPayload) {
+			return payload.toString();
 		}
 
 		String clazz = payload == null ? "null" : payload.getClass().getSimpleName();
@@ -211,6 +225,14 @@ public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestRespon
 		return Long.parseLong(result);
 	}
 
+	protected Map<String, String> payloadToMap(Object[] payloads) {
+		Map<String, String> result = Maps.newHashMap();
+		for (int i = 0; i < payloads.length; i += 2) {
+			result.put(payloadToString(payloads[i]), payloadToString(payloads[i + 1]));
+		}
+		return result;
+	}
+
 	@Override
 	public String getName() {
 		return getClass().getSimpleName();
@@ -245,7 +267,8 @@ public abstract class AbstractRedisCommand<T> extends AbstractNettyRequestRespon
 		this.logRequest = logRequest;
 	}
 
-	protected boolean isProxyEnabled(Endpoint endpoint) {
-		return endpoint instanceof ProxyEnabled;
+	protected AbstractRedisCommand setInOutPayloadFactory(InOutPayloadFactory inOutPayloadFactory) {
+		this.inOutPayloadFactory = inOutPayloadFactory;
+		return this;
 	}
 }

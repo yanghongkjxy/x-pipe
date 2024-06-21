@@ -1,15 +1,23 @@
 package com.ctrip.xpipe.redis.console.proxy;
 
+import com.ctrip.xpipe.redis.checker.model.ProxyTunnelInfo;
+import com.ctrip.xpipe.redis.console.proxy.impl.DefaultTunnelInfo;
+
+import java.io.Serializable;
 import java.util.List;
 
-public interface ProxyChain {
+public interface ProxyChain extends Serializable {
 
-    String getBackupDc();
+    String getBackupDcId();
 
-    String getCluster();
+    String getClusterId();
 
-    String getShard();
+    String getShardId();
 
-    List<TunnelInfo> getTunnels();
+    String getPeerDcId();
+
+    List<DefaultTunnelInfo> getTunnelInfos();
+
+    ProxyTunnelInfo buildProxyTunnelInfo();
 
 }

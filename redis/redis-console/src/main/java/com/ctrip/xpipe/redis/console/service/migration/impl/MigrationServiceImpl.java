@@ -1,25 +1,37 @@
 package com.ctrip.xpipe.redis.console.service.migration.impl;
 
+import com.ctrip.xpipe.api.retry.RetryTemplate;
+import com.ctrip.xpipe.cluster.ClusterType;
+import com.ctrip.xpipe.command.AbstractCommand;
 import com.ctrip.xpipe.endpoint.HostPort;
-import com.ctrip.xpipe.redis.console.alert.ALERT_TYPE;
-import com.ctrip.xpipe.redis.console.alert.AlertManager;
+import com.ctrip.xpipe.redis.checker.DcRelationsService;
+import com.ctrip.xpipe.redis.checker.alert.ALERT_TYPE;
+import com.ctrip.xpipe.redis.checker.alert.AlertManager;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
+import com.ctrip.xpipe.redis.console.annotation.DalTransaction;
+import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
+import com.ctrip.xpipe.redis.console.controller.api.migrate.meta.MigrationProgress;
 import com.ctrip.xpipe.redis.console.dao.MigrationClusterDao;
 import com.ctrip.xpipe.redis.console.dao.MigrationEventDao;
+import com.ctrip.xpipe.redis.console.exception.BadRequestException;
 import com.ctrip.xpipe.redis.console.healthcheck.nonredis.migration.MigrationSystemAvailableChecker;
+import com.ctrip.xpipe.redis.console.job.retry.RetryCondition;
+import com.ctrip.xpipe.redis.console.job.retry.RetryNTimesOnCondition;
 import com.ctrip.xpipe.redis.console.migration.manager.MigrationEventManager;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
+import com.ctrip.xpipe.redis.console.migration.status.ClusterStatus;
 import com.ctrip.xpipe.redis.console.migration.status.MigrationStatus;
 import com.ctrip.xpipe.redis.console.model.*;
 import com.ctrip.xpipe.redis.console.query.DalQuery;
-import com.ctrip.xpipe.redis.console.service.AbstractConsoleService;
-import com.ctrip.xpipe.redis.console.service.ClusterService;
-import com.ctrip.xpipe.redis.console.service.ConfigService;
-import com.ctrip.xpipe.redis.console.service.DcService;
+import com.ctrip.xpipe.redis.console.service.*;
 import com.ctrip.xpipe.redis.console.service.migration.MigrationService;
 import com.ctrip.xpipe.redis.console.service.migration.exception.*;
+import com.ctrip.xpipe.redis.core.meta.MetaCache;
+import com.ctrip.xpipe.utils.DateTimeUtils;
 import com.ctrip.xpipe.utils.StringUtil;
 import com.ctrip.xpipe.utils.VisibleForTesting;
+import com.google.common.collect.Lists;
 import org.codehaus.plexus.component.repository.exception.ComponentLookupException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -28,9 +40,10 @@ import org.unidal.lookup.ContainerLoader;
 
 import javax.annotation.PostConstruct;
 import java.rmi.ServerException;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 @Service
 public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventTblDao> implements MigrationService {
@@ -43,6 +56,9 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
 
     @Autowired
     private ClusterService clusterService;
+
+    @Autowired
+    private DcClusterService dcClusterService;
 
     @Autowired
     private AlertManager alertManager;
@@ -58,6 +74,15 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
 
     @Autowired
     private ConfigService configService;
+
+    @Autowired
+    private MetaCache metaCache;
+
+    @Autowired
+    private ConsoleConfig config;
+
+    @Autowired
+    private DcRelationsService dcRelationsService;
 
     private MigrationShardTblDao migrationShardTblDao;
 
@@ -78,6 +103,97 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
                 return dao.findByPK(id, MigrationEventTblEntity.READSET_FULL);
             }
         });
+    }
+
+    @Override
+    public long countAll() {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return dao.countAll(MigrationEventTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
+    @Override
+    public long countAllByCluster(long clusterId) {
+        return migrationClusterDao.countAllByCluster(clusterId);
+    }
+
+    @Override
+    public long countAllByOperator(String operator) {
+        return migrationClusterDao.countAllByOperator(operator);
+    }
+
+    @Override
+    public long countAllByStatus(String status) {
+        return migrationClusterDao.countAllByStatus(status);
+    }
+
+    @Override
+    public long countAllWithoutTestCluster() {
+        return migrationClusterDao.countAllEventsWithoutTestClusters();
+    }
+
+    @Override
+    public List<MigrationModel> find(long size, long offset) {
+        List<MigrationClusterTbl> migrationClusterList = migrationClusterDao.find(size, offset);
+        return aggregateClusterByMigration(migrationClusterList);
+    }
+
+    @Override
+    public List<MigrationModel> findByCluster(long clusterId, long size, long offset) {
+        List<MigrationClusterTbl> migrationClusterList =
+                migrationClusterDao.findByCluster(clusterId, size, offset);
+        return aggregateClusterByMigration(migrationClusterList);
+    }
+
+    @Override
+    public List<MigrationModel> findByOperator(String operator, long size, long offset) {
+        List<MigrationClusterTbl> migrationClusterList =
+                migrationClusterDao.findByOperator(operator, size, offset);
+        return aggregateClusterByMigration(migrationClusterList);
+    }
+
+    @Override
+    public List<MigrationModel> findByStatus(String status, long size, long offset) {
+        List<MigrationClusterTbl> migrationClusterList =
+                migrationClusterDao.findByStatus(status, size, offset);
+        return aggregateClusterByMigration(migrationClusterList);
+    }
+
+    @Override
+    public List<MigrationModel> findWithoutTestClusters(long size, long offset) {
+        List<Long> migrationEventIds =
+                migrationClusterDao.findAllEventsWithoutTestCluster(size, offset)
+                        .stream().map(MigrationClusterTbl::getMigrationEventId).collect(Collectors.toList());
+        if (migrationEventIds.isEmpty()) return Collections.emptyList();
+        List<MigrationClusterTbl> migrationClusterList = migrationClusterDao.findByMigEventIds(migrationEventIds);
+        return aggregateClusterByMigration(migrationClusterList);
+    }
+
+    private List<MigrationModel> aggregateClusterByMigration(List<MigrationClusterTbl> migrationClusterTblList) {
+        Map<Long, List<MigrationClusterTbl> > clusterMap = new LinkedHashMap<>();
+
+        for (MigrationClusterTbl migrationCluster: migrationClusterTblList) {
+            MigrationEventTbl event = migrationCluster.getMigrationEvent();
+
+            if (!clusterMap.containsKey(event.getId())) {
+                clusterMap.put(event.getId(), new LinkedList<>());
+            }
+
+            clusterMap.get(event.getId()).add(migrationCluster);
+        }
+
+        Iterator<Map.Entry<Long, List<MigrationClusterTbl> > > iterator = clusterMap.entrySet().iterator();
+        List<MigrationModel> modals = new LinkedList<>();
+
+        while (iterator.hasNext()) {
+            List<MigrationClusterTbl> clusters = iterator.next().getValue();
+            modals.add(MigrationModel.createFromMigrationClusters(clusters));
+        }
+
+        return modals;
     }
 
     @Override
@@ -143,9 +259,47 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
 
     @Override
     public Long createMigrationEvent(MigrationRequest request) {
+        preCheck(request);
         MigrationEvent event = migrationEventDao.createMigrationEvent(request);
         migrationEventManager.addEvent(event);
         return event.getEvent().getId();
+    }
+
+    private void preCheck(MigrationRequest request) {
+        List<MigrationRequest.ClusterInfo> clusterinfos = request.getRequestClusters();
+        for(MigrationRequest.ClusterInfo clusterInfo : clusterinfos) {
+            if(clusterInfo.getToDcId() < 0 || !isDestDcIdValid(clusterInfo.getClusterId(), clusterInfo.getToDcId())) {
+                throw new BadRequestException("Target DC Id Illegal for cluster: " + clusterInfo.getClusterId());
+            }
+
+            ClusterType clusterType;
+            String clusterName;
+            if (StringUtil.isEmpty(clusterInfo.getClusterName())) {
+                ClusterTbl clusterTbl = clusterService.find(clusterInfo.getClusterId());
+                clusterType = ClusterType.lookup(clusterTbl.getClusterType());
+                clusterName = clusterTbl.getClusterName();
+            } else {
+                clusterType = metaCache.getClusterType(clusterInfo.getClusterName());
+                clusterName = clusterInfo.getClusterName();
+            }
+
+            if (null == clusterType || !clusterType.supportMigration() || config.getMigrationUnsupportedClusters().contains(clusterName.toLowerCase()))
+                throw new BadRequestException(String.format("cluster %s type %s not support migration", clusterInfo.getClusterName(), clusterType));
+
+        }
+    }
+
+    private boolean isDestDcIdValid(long clusterId, long dcId) {
+        try {
+            DcClusterTbl dcClusterTbl = dcClusterService.find(dcId, clusterId);
+            if(dcClusterTbl == null) {
+                return false;
+            }
+        } catch (Exception e) {
+            logger.error("[isDestDcIdValid]", e);
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -225,14 +379,14 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
     }
 
     @Override
-    public void forcePublishMigrationCluster(long eventId, long clusterId) {
+    public void forceProcessMigrationCluster(long eventId, long clusterId) {
         if (isMigrationClusterExist(eventId, clusterId)) {
-            migrationEventManager.getEvent(eventId).getMigrationCluster(clusterId).forcePublish();
+            migrationEventManager.getEvent(eventId).getMigrationCluster(clusterId).forceProcess();
         }
     }
 
     @Override
-    public void forceEndMigrationClsuter(long eventId, long clusterId) {
+    public void forceEndMigrationCluster(long eventId, long clusterId) {
         if (isMigrationClusterExist(eventId, clusterId)) {
             migrationEventManager.getEvent(eventId).getMigrationCluster(clusterId).forceEnd();
         }
@@ -262,7 +416,8 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
     }
 
     @Override
-    public TryMigrateResult tryMigrate(String clusterName, String fromIdc, String toIdc) throws ClusterNotFoundException, ClusterActiveDcNotRequest, ClusterMigratingNow, ToIdcNotFoundException, MigrationSystemNotHealthyException {
+    public TryMigrateResult tryMigrate(String clusterName, String fromIdc, String toIdc)
+            throws ClusterNotFoundException, MigrationNotSupportException, ClusterActiveDcNotRequest, ClusterMigratingNow, ToIdcNotFoundException, MigrationSystemNotHealthyException, ClusterMigratingNowButMisMatch {
 
         if(!checker.getResult().isAvaiable() && !configService.ignoreMigrationSystemAvailability()) {
             throw new MigrationSystemNotHealthyException(checker.getResult().getMessage());
@@ -271,12 +426,28 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
         if (clusterTbl == null) {
             throw new ClusterNotFoundException(clusterName);
         }
+        if (!ClusterType.lookup(clusterTbl.getClusterType()).supportMigration()) {
+            throw new MigrationNotSupportException(clusterName);
+        }
+        if (config.getMigrationUnsupportedClusters().contains(clusterName.toLowerCase())) {
+            throw new MigrationNotSupportException(clusterName);
+        }
 
         MigrationClusterTbl unfinished = findLatestUnfinishedMigrationCluster(clusterTbl.getId());
         if (unfinished != null) {
+            long migrationEventId = unfinished.getMigrationEventId();
             long fromDcId = unfinished.getSourceDcId();
             long toDcId = unfinished.getDestinationDcId();
-            throw new ClusterMigratingNow(clusterName, dcService.getDcName(fromDcId), dcService.getDcName(toDcId), unfinished.getMigrationEventId());
+            String realFromIdc = dcService.getDcName(fromDcId);
+            String realToIdc = dcService.getDcName(toDcId);
+            if(fromIdc == null || fromIdc.equalsIgnoreCase(realFromIdc)){
+                if(toIdc == null || toIdc.equalsIgnoreCase(realToIdc)){
+                    logger.info("[tryMigrate][already migrating]{},real({}->{}), request({}->{})",
+                            migrationEventId, realFromIdc, realToIdc, fromIdc, toIdc);
+                    throw new ClusterMigratingNow(clusterName, realFromIdc, realToIdc, unfinished.getMigrationEventId());
+                }
+            }
+            throw new ClusterMigratingNowButMisMatch(clusterName, realFromIdc, realToIdc, unfinished.getMigrationEventId(), fromIdc, toIdc);
         }
 
         long activedcId = clusterTbl.getActivedcId();
@@ -286,13 +457,133 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
         }
 
         List<DcTbl> clusterRelatedDc = dcService.findClusterRelatedDc(clusterName);
-        logger.debug("[tryMigrate][clusterRelatedDc]", clusterRelatedDc);
+        logger.debug("[tryMigrate][clusterRelatedDc]{}", clusterRelatedDc);
 
-        DcTbl toDc = findToDc(fromIdc, toIdc, clusterRelatedDc);
+        DcTbl toDc = findToDc(clusterTbl, fromIdc, toIdc, clusterRelatedDc);
         return new TryMigrateResult(clusterTbl, activeDc, toDc);
     }
 
-    protected DcTbl findToDc(String fromIdc, String toIdc, List<DcTbl> clusterRelatedDc) throws ToIdcNotFoundException {
+    @Override
+    public RetMessage getMigrationSystemHealth() {
+        MigrationSystemAvailableChecker.MigrationSystemAvailability availability = this.getMigrationSystemAvailability();
+        if(availability.isAvaiable()) {
+            if(!availability.isWarning()) {
+                logger.debug("[getMigrationSystemHealthStatus][good]");
+                return RetMessage.createSuccessMessage();
+            } else {
+                logger.debug("[getMigrationSystemHealthStatus][warned]");
+                return RetMessage.createWarningMessage(availability.getMessage());
+            }
+        }
+        if(configService.ignoreMigrationSystemAvailability()) {
+            logger.warn("[getMigrationSystemHealthStatus][warn]{}", availability.getMessage());
+            return RetMessage.createWarningMessage(availability.getMessage());
+        } else {
+            logger.error("[getMigrationSystemHealthStatus][warn]{}", availability.getMessage());
+            return RetMessage.createFailMessage(availability.getMessage());
+        }
+    }
+
+    @Override
+    public MigrationProgress buildMigrationProgress(int hours) {
+        MigrationProgress progress = new MigrationProgress();
+        long totalMigrationSeconds = 0;
+
+        List<MigrationClusterTbl> migrationClusterTbls = migrationClusterDao
+                .findLatestMigrationClusters(DateTimeUtils.getHoursBeforeDate(new Date(), hours));
+
+        for (MigrationClusterTbl migrationClusterTbl : migrationClusterTbls) {
+            progress.addMigrationCluster(migrationClusterTbl);
+            MigrationStatus status = MigrationStatus.valueOf(migrationClusterTbl.getStatus());
+            if (MigrationStatus.Success.equals(status)) {
+                if (null == migrationClusterTbl.getEndTime() || null == migrationClusterTbl.getStartTime()) {
+                    logger.info("[buildMigrationProgress][{}] no time but success", migrationClusterTbl.getId());
+                }
+                long durationMilli = migrationClusterTbl.getEndTime().getTime() - migrationClusterTbl.getStartTime().getTime();
+                totalMigrationSeconds += TimeUnit.MILLISECONDS.toSeconds(durationMilli);
+            }
+        }
+        if (progress.getSuccess() > 0) progress.setAvgMigrationSeconds(totalMigrationSeconds / progress.getSuccess());
+        progress.setActiveDcs(clusterService.getMigratableClustersCountByActiveDc());
+
+        return progress;
+    }
+
+    @Override
+    public Set<String> migrationUnsupportedClusters() {
+        return config.getMigrationUnsupportedClusters();
+    }
+
+    @Override
+    @DalTransaction
+    public void updateMigrationStatus(MigrationCluster migrationCluster, MigrationStatus status) {
+        try {
+            MigrationClusterTbl migrationClusterTbl = migrationCluster.getMigrationCluster();
+            tryUpdateStartTime(migrationCluster.clusterName(), migrationClusterTbl.getId(), status);
+            updateStorageClusterStatus(migrationClusterTbl.getMigrationEventId(),
+                    migrationCluster.getCurrentCluster().getId(), migrationCluster.clusterName(), status.getClusterStatus());
+            updateStatusAndEndTimeById(migrationClusterTbl.getId(), status, new Date());
+        } catch (Exception e) {
+            logger.error("[updateMigrationStatus] ", e);
+            throw new com.ctrip.xpipe.redis.console.exception.ServerException(e.getMessage());
+        }
+    }
+
+    private void tryUpdateStartTime(String clusterName, long migrationClusterId, MigrationStatus migrationStatus) {
+        try{
+            if(MigrationStatus.updateStartTime(migrationStatus)){
+                logger.info("[tryUpdateStartTime][doUpdate]{}, {}, {}", migrationClusterId, clusterName, migrationStatus);
+                updateMigrationClusterStartTime(migrationClusterId, new Date());
+            }
+        }catch (Exception e){
+            logger.error("[tryUpdateStartTime]" + clusterName, e);
+        }
+    }
+
+    @VisibleForTesting
+    protected void updateStorageClusterStatus(long migrationEventId, long clusterId, String clusterName, ClusterStatus clusterStatus) throws Exception {
+        logger.info("[updateStorageClusterStatus][updatedb]{}, {}", clusterName, clusterStatus);
+        RetryTemplate<String> retryTemplate = new RetryNTimesOnCondition<>(new RetryCondition.AbstractRetryCondition<String>() {
+            @Override
+            public boolean isSatisfied(String s) {
+                return ClusterStatus.isSameClusterStatus(s, clusterStatus);
+            }
+
+            @Override
+            public boolean isExceptionExpected(Throwable th) {
+                if(th instanceof TimeoutException)
+                    return true;
+                return false;
+            }
+        }, 3);
+        retryTemplate.execute(new AbstractCommand<String>() {
+            @Override
+            protected void doExecute() throws Exception {
+                try {
+                    clusterService.updateStatusById(clusterId, clusterStatus, migrationEventId);
+                    ClusterTbl newCluster = clusterService.find(clusterName);
+                    future().setSuccess(newCluster.getStatus());
+                } catch (Exception e) {
+                    future().setFailure(e.getCause());
+                }
+            }
+
+            @Override
+            protected void doReset() {
+
+            }
+
+            @Override
+            public String getName() {
+                return "update cluster status";
+            }
+        });
+
+        ClusterTbl newCluster = clusterService.find(clusterName);
+        logger.info("[updateStorageClusterStatus][getdb]{}, {}", clusterName, newCluster != null ? newCluster.getStatus() : null);
+    }
+
+    protected DcTbl findToDc(ClusterTbl cluster, String fromIdc, String toIdc, List<DcTbl> clusterRelatedDc) throws ToIdcNotFoundException {
 
         DcTbl fromIdcInfo = null;
         for(DcTbl dcTbl : clusterRelatedDc) {
@@ -302,13 +593,21 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
             }
         }
         if(StringUtil.isEmpty(toIdc)){
-            //simple
+            Map<String, DcTbl> availableDcs = new HashMap<>();
             for (DcTbl dcTbl : clusterRelatedDc) {
                 if (!dcTbl.getDcName().equalsIgnoreCase(fromIdc) && isSameZone(fromIdcInfo, dcTbl)) {
-                    return dcTbl;
+                    availableDcs.put(dcTbl.getDcName().toUpperCase(), dcTbl);
                 }
             }
-            throw new ToIdcNotFoundException(String.format("fromIdc:%s, toIdc empty, can not find target dc %s", fromIdc, clusterRelatedDcToString(clusterRelatedDc)));
+            if (availableDcs.isEmpty())
+                throw new ToIdcNotFoundException(String.format("fromIdc:%s, toIdc empty, no available dcs found from related dcs: %s", fromIdc, clusterRelatedDcToString(clusterRelatedDc)));
+
+            toIdc = dcRelationsService.getClusterTargetDcByPriority(cluster.getId(), cluster.getClusterName(), fromIdc, Lists.newArrayList(availableDcs.keySet()));
+            if (StringUtil.isEmpty(toIdc)) {
+                logger.error("[findToDc][{}]fromIdc:{}, can not find target dc from available dcs: {}", cluster.getClusterName(), fromIdc, availableDcs);
+                throw new ToIdcNotFoundException(String.format("fromIdc:%s, toIdc empty, can not find target dc %s", fromIdc, clusterRelatedDcToString(clusterRelatedDc)));
+            }
+            return availableDcs.get(toIdc.toUpperCase());
         }else {
 
             if(toIdc.equalsIgnoreCase(fromIdc)){
@@ -335,6 +634,23 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
         }
     }
 
+    @Override
+    public Set<String> getLatestMigrationOperators(int hours) {
+        List<MigrationEventTbl> latestMigrateEvents = migrationEventDao.findLatestMigrateEvent(DateTimeUtils.getHoursBeforeDate(new Date(), hours));
+        return latestMigrateEvents.stream().map(migrationEventTbl ->  migrationEventTbl.getOperator()).collect(Collectors.toSet());
+    }
+
+
+    @Override
+    public List<MigrationClusterTbl> getLatestMigrationClusters(int seconds) {
+        return migrationClusterDao.findLatestMigrationClusterWithClusterName(DateTimeUtils.getSecondBeforeDate(new Date(), seconds));
+    }
+
+    @Override
+    public List<MigrationClusterTbl> fetchMigrationClusters(Set<String> clusters, long from, long to) {
+        return migrationClusterDao.findMigrationClustersByNameAndTime(clusters, new Date(from), new Date(to));
+    }
+
     private String clusterRelatedDcToString(List<DcTbl> clusterRelatedDc) {
         return StringUtil.join(",", (dcTbl) -> dcTbl.getDcName() , clusterRelatedDc);
     }
@@ -346,8 +662,60 @@ public class MigrationServiceImpl extends AbstractConsoleService<MigrationEventT
     }
 
     @VisibleForTesting
-    protected MigrationServiceImpl setChecker(MigrationSystemAvailableChecker checker) {
+    public MigrationServiceImpl setChecker(MigrationSystemAvailableChecker checker) {
         this.checker = checker;
         return this;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setMigrationEventManager(MigrationEventManager migrationEventManager) {
+        this.migrationEventManager = migrationEventManager;
+        return this;
+    }
+
+    @VisibleForTesting
+    public MigrationEventManager getMigrationEventManager() {
+        return migrationEventManager;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setClusterService(ClusterService clusterService) {
+        this.clusterService = clusterService;
+        return this;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setDcClusterService(DcClusterService dcClusterService) {
+        this.dcClusterService = dcClusterService;
+        return this;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setDcService(DcService dcService) {
+        this.dcService = dcService;
+        return this;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setMigrationClusterDao(MigrationClusterDao migrationClusterDao) {
+        this.migrationClusterDao = migrationClusterDao;
+        return this;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setConfigService(ConfigService configService) {
+        this.configService = configService;
+        return this;
+    }
+
+    @VisibleForTesting
+    public MigrationServiceImpl setMigrationShardTblDao(MigrationShardTblDao migrationShardTblDao) {
+        this.migrationShardTblDao = migrationShardTblDao;
+        return this;
+    }
+
+    @VisibleForTesting
+    void setDcRelationsService(DcRelationsService dcRelationsService) {
+        this.dcRelationsService = dcRelationsService;
     }
 }

@@ -1,20 +1,24 @@
 package com.ctrip.xpipe.redis.console.controller.api.data;
 
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.redis.checker.controller.result.GenericRetMessage;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
 import com.ctrip.xpipe.redis.console.controller.AbstractConsoleController;
-import com.ctrip.xpipe.redis.console.controller.api.GenericRetMessage;
-import com.ctrip.xpipe.redis.console.controller.api.RetMessage;
+import com.ctrip.xpipe.redis.console.controller.annotation.ClusterTypeLimit;
 import com.ctrip.xpipe.redis.console.controller.api.data.meta.KeeperContainerCreateInfo;
+import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.RedisTbl;
 import com.ctrip.xpipe.redis.console.service.*;
 import com.ctrip.xpipe.redis.console.service.exception.ResourceNotFoundException;
-import com.ctrip.xpipe.redis.core.protocal.RedisProtocol;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+
+import static com.ctrip.xpipe.redis.core.protocal.RedisProtocol.KEEPER_PORT_DEFAULT;
 
 /**
  * @author wenchao.meng
@@ -35,9 +39,13 @@ public class KeeperUpdateController extends AbstractConsoleController {
   private KeeperService keeperService;
 
   @Autowired
-  private KeepercontainerService keepercontainerService;
+  private KeeperContainerService keeperContainerService;
 
-  @RequestMapping(value = "/keepers/{dcId}/{clusterId}/{shardId}", method = RequestMethod.GET)
+  @Autowired
+  protected ClusterService clusterService;
+
+  @ClusterTypeLimit(value = {ClusterType.ONE_WAY, ClusterType.HETERO})
+  @RequestMapping(value = "/keepers/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.GET)
   public List<String> getKeepers(@PathVariable String dcId, @PathVariable String clusterId,
       @PathVariable String shardId) {
 
@@ -62,7 +70,7 @@ public class KeeperUpdateController extends AbstractConsoleController {
     return result;
   }
 
-  @RequestMapping(value = "/keepers/{dcId}/{clusterId}/{shardId}", method = RequestMethod.POST)
+  @RequestMapping(value = "/keepers/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.POST)
   public RetMessage addKeepers(@PathVariable String dcId, @PathVariable String clusterId,
       @PathVariable String shardId) {
 
@@ -79,19 +87,28 @@ public class KeeperUpdateController extends AbstractConsoleController {
       return RetMessage.createFailMessage(e.getMessage());
     }
 
+    ClusterTbl clusterTbl = clusterService.find(clusterId);
+    if (null == clusterTbl) {
+      return RetMessage.createFailMessage("not found cluster " + clusterId);
+    }
+    if (!ClusterType.lookup(clusterTbl.getClusterType()).supportKeeper()) {
+      return RetMessage.createFailMessage("cluster " + clusterId + " not support keepers");
+    }
+
     try {
       List<KeeperBasicInfo> bestKeepers =
-          keeperAdvancedService.findBestKeepers(dcId, RedisProtocol.REDIS_PORT_DEFAULT, (ip, port) -> true, clusterId);
-      logger.info("[addKeepers]{},{},{},{}, {}", dcId, clusterId, shardId, bestKeepers);
+          keeperAdvancedService.findBestKeepers(dcId, KEEPER_PORT_DEFAULT, (ip, port) -> true, clusterId);
+      logger.info("[addKeepers]{},{},{},{}", dcId, clusterId, shardId, bestKeepers);
       redisService.insertKeepers(dcId, clusterId, shardId, bestKeepers);
       return RetMessage.createSuccessMessage("insert success:" + bestKeepers);
-    } catch (Exception e) {
-      logger.error("[addKeepers]" + dcId + "," + clusterId + "," + shardId, e);
-      return RetMessage.createFailMessage("insert fail:" + e.getMessage());
+    } catch (Throwable th) {
+      logger.error("[addKeepers]" + dcId + "," + clusterId + "," + shardId, th);
+      return RetMessage.createFailMessage("insert fail:" + th.getMessage());
     }
   }
 
-  @RequestMapping(value = "/keepers/{dcId}/{clusterId}/{shardId}", method = RequestMethod.DELETE)
+  @ClusterTypeLimit(value = {ClusterType.ONE_WAY, ClusterType.HETERO})
+  @RequestMapping(value = "/keepers/{dcId}/" + CLUSTER_ID_PATH_VARIABLE + "/" + SHARD_ID_PATH_VARIABLE, method = RequestMethod.DELETE)
   public RetMessage deleteKeepers(@PathVariable String dcId, @PathVariable String clusterId,
       @PathVariable String shardId) {
 
@@ -109,21 +126,21 @@ public class KeeperUpdateController extends AbstractConsoleController {
         message = "success, but already no keepers";
       }
       return RetMessage.createSuccessMessage(message);
-    } catch (Exception e) {
-      logger.error("[deleteKeepers]", e);
-      return RetMessage.createFailMessage(e.getMessage());
+    } catch (Throwable th) {
+      logger.error("[deleteKeepers]", th);
+      return RetMessage.createFailMessage(th.getMessage());
     }
   }
 
   @RequestMapping(value = "/keepers/check", method = RequestMethod.POST)
   public RetMessage isKeeper(@RequestBody HostPort hostPort) {
-    logger.info("[isKeeper] check {} keeper or not", hostPort);
+    logger.debug("[isKeeper] check {} keeper or not", hostPort);
     try {
         boolean result = keeperService.isKeeper(hostPort);
         return GenericRetMessage.createGenericRetMessage(result);
-    } catch (Exception e) {
-        logger.error("[isKeeper]{}", e);
-        return RetMessage.createFailMessage(e.getMessage());
+    } catch (Throwable th) {
+        logger.error("[isKeeper]{}", th);
+        return RetMessage.createFailMessage(th.getMessage());
     }
   }
 
@@ -131,19 +148,19 @@ public class KeeperUpdateController extends AbstractConsoleController {
   public RetMessage addKeeperContainer(@RequestBody KeeperContainerCreateInfo createInfo) {
     try {
       createInfo.check();
-      keepercontainerService.addKeeperContainer(createInfo);
+      keeperContainerService.addKeeperContainer(createInfo);
       return RetMessage.createSuccessMessage("Add KeeperContainer successfully");
-    } catch (Exception e) {
-      return RetMessage.createFailMessage(e.getMessage());
+    } catch (Throwable th) {
+      return RetMessage.createFailMessage(th.getMessage());
     }
   }
 
   @RequestMapping(value = "/keepercontainer/{dcName}", method = RequestMethod.GET)
   public List<KeeperContainerCreateInfo> getKeeperContainersByDc(@PathVariable String dcName) {
     try {
-      return keepercontainerService.getDcAllKeeperContainers(dcName);
-    } catch (Exception e) {
-      logger.error("[getKeeperContainersByDc]", e);
+      return keeperContainerService.getDcAllKeeperContainers(dcName);
+    } catch (Throwable th) {
+      logger.error("[getKeeperContainersByDc]", th);
     }
     return Collections.emptyList();
   }
@@ -152,12 +169,23 @@ public class KeeperUpdateController extends AbstractConsoleController {
   public RetMessage updateKeeperContainer(@RequestBody KeeperContainerCreateInfo createInfo) {
     try {
       createInfo.check();
-      keepercontainerService.updateKeeperContainer(createInfo);
+      keeperContainerService.updateKeeperContainer(createInfo);
       return RetMessage.createSuccessMessage();
-    } catch (Exception e) {
-      logger.error("[updateKeeperContainer]", e);
-      return RetMessage.createFailMessage(e.getMessage());
+    } catch (Throwable th) {
+      logger.error("[updateKeeperContainer]", th);
+      return RetMessage.createFailMessage(th.getMessage());
     }
-
   }
+
+  @RequestMapping(value = "/keepercontainer/{keepercontaierIp}/{keepercontainerPort}", method = RequestMethod.DELETE)
+  public RetMessage deleteKeepercontainer(@PathVariable String keepercontaierIp, @PathVariable Integer keepercontainerPort) {
+    try {
+      keeperContainerService.deleteKeeperContainer(keepercontaierIp,keepercontainerPort);
+      return RetMessage.createSuccessMessage();
+    } catch (Throwable th) {
+      logger.error("[deleteKeepercontainer][fail] {}:{}", keepercontaierIp, keepercontainerPort, th);
+      return RetMessage.createFailMessage(th.getMessage());
+    }
+  }
+
 }

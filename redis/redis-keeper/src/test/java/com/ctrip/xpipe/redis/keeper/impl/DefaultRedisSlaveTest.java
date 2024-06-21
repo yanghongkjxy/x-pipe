@@ -1,11 +1,13 @@
 package com.ctrip.xpipe.redis.keeper.impl;
 
-
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.netty.filechannel.ReferenceFileRegion;
 import com.ctrip.xpipe.redis.core.protocal.protocal.EofType;
 import com.ctrip.xpipe.redis.core.protocal.protocal.LenEofType;
+import com.ctrip.xpipe.redis.core.store.OffsetReplicationProgress;
+import com.ctrip.xpipe.redis.core.store.ReplicationStore;
 import com.ctrip.xpipe.redis.keeper.AbstractRedisKeeperTest;
+import com.ctrip.xpipe.redis.keeper.KeeperRepl;
 import com.ctrip.xpipe.redis.keeper.RedisClient;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.google.common.util.concurrent.MoreExecutors;
@@ -18,8 +20,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
-import sun.java2d.SurfaceDataProxy;
+import org.mockito.Mockito;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
@@ -28,8 +30,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Matchers.any;
+import static org.mockito.Mockito.*;
 
 /**
  * @author wenchao.meng
@@ -39,13 +41,19 @@ import static org.mockito.Mockito.when;
 @RunWith(MockitoJUnitRunner.class)
 public class DefaultRedisSlaveTest extends AbstractRedisKeeperTest {
 
-    private int waitDumpMilli = 100;
+    private int waitDumpMilli = 200;
 
     @Mock
     public Channel channel;
 
     @Mock
     public RedisKeeperServer redisKeeperServer;
+
+    @Mock
+    private ReplicationStore replicationStore;
+
+    @Mock
+    private KeeperRepl keeperRepl;
 
     public DefaultRedisSlave redisSlave;
 
@@ -54,6 +62,8 @@ public class DefaultRedisSlaveTest extends AbstractRedisKeeperTest {
 
         when(channel.closeFuture()).thenReturn(new DefaultChannelPromise(channel));
         when(channel.remoteAddress()).thenReturn(localhostInetAdress(randomPort()));
+        when(keeperRepl.replId()).thenReturn("test-repl-id");
+        when(redisKeeperServer.getKeeperRepl()).thenReturn(keeperRepl);
 
         RedisClient redisClient = new DefaultRedisClient(channel, redisKeeperServer);
         redisSlave= new DefaultRedisSlave(redisClient);
@@ -72,17 +82,17 @@ public class DefaultRedisSlaveTest extends AbstractRedisKeeperTest {
         redisSlave.sendMessage(Unpooled.wrappedBuffer(randomString(10).getBytes()));
 
         //should fail
-        shouldThrowException(() -> redisSlave.onCommand(mock(ReferenceFileRegion.class)));
-        shouldThrowException(() -> redisSlave.beginWriteRdb(mock(EofType.class), 0L));
-        shouldThrowException(() -> redisSlave.beginWriteCommands(0L));
+        shouldThrowException(() -> redisSlave.onCommand(null, 0L, mock(ReferenceFileRegion.class)));
+        shouldThrowException(() -> redisSlave.beginWriteRdb(mock(EofType.class), new OffsetReplicationProgress(0L)));
+        shouldThrowException(() -> redisSlave.beginWriteCommands(new OffsetReplicationProgress(0L)));
 
         redisSlave.markPsyncProcessed();
         //all should fail
         shouldThrowException(() -> redisSlave.sendMessage(randomString(10).getBytes()));
         shouldThrowException(() -> redisSlave.sendMessage(Unpooled.wrappedBuffer(randomString(10).getBytes())));
-        shouldThrowException(() -> redisSlave.onCommand(mock(ReferenceFileRegion.class)));
-        shouldThrowException(() -> redisSlave.beginWriteRdb(mock(EofType.class), 0L));
-        shouldThrowException(() -> redisSlave.beginWriteCommands(0L));
+        shouldThrowException(() -> redisSlave.onCommand(null, 0L, mock(ReferenceFileRegion.class)));
+        shouldThrowException(() -> redisSlave.beginWriteRdb(mock(EofType.class), new OffsetReplicationProgress(0L)));
+        shouldThrowException(() -> redisSlave.beginWriteCommands(new OffsetReplicationProgress(0L)));
 
     }
 
@@ -172,7 +182,7 @@ public class DefaultRedisSlaveTest extends AbstractRedisKeeperTest {
 
         sleep(waitDumpMilli / 2);
 
-        redisSlave.beginWriteRdb(new LenEofType(1000), 2);
+        redisSlave.beginWriteRdb(new LenEofType(1000), new OffsetReplicationProgress(2));
 
         sleep(waitDumpMilli);
 
@@ -215,6 +225,44 @@ public class DefaultRedisSlaveTest extends AbstractRedisKeeperTest {
 
         logger.info("{}, {}", listenerCount, notifyCount);
         Assert.assertEquals(listenerCount.get(), notifyCount.get());
+    }
+
+    @Test
+    public void testSlaveClosedWhenSendCommandFail() throws Exception {
+        when(redisKeeperServer.getReplicationStore()).thenReturn(replicationStore);
+        doThrow(new IOException("File for offset 0 does not exist")).when(replicationStore).addCommandsListener(any(), any());
+
+        redisSlave.beginWriteRdb(new LenEofType(1000), new OffsetReplicationProgress(0));
+        Assert.assertTrue(redisSlave.isOpen());
+        redisSlave.sendCommandForFullSync();
+        waitConditionUntilTimeOut(() -> !redisSlave.isOpen());
+    }
+
+    @Test
+    public void testMultiBeginWritingCmds() throws Exception {
+        when(redisKeeperServer.getReplicationStore()).thenReturn(replicationStore);
+        redisSlave.beginWriteCommands(new OffsetReplicationProgress(0L));
+        redisSlave.beginWriteCommands(new OffsetReplicationProgress(0L));
+
+        verify(replicationStore).addCommandsListener(any(), any());
+    }
+
+    @Test
+    public void testAckPutOnline() {
+        DefaultRedisSlave rs = Mockito.spy(redisSlave);
+        Mockito.doNothing().when(rs).sendCommandForFullSync();
+
+        rs.setPutOnLineOnAck(false);
+        rs.ack(1L, false);
+        verify(rs, times(0)).sendCommandForFullSync();
+
+        rs.setPutOnLineOnAck(true);
+        rs.ack(1L, false);
+        verify(rs, times(0)).sendCommandForFullSync();
+
+        rs.setPutOnLineOnAck(true);
+        rs.ack(1L, true);
+        verify(rs, times(1)).sendCommandForFullSync();
     }
 
 }

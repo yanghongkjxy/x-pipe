@@ -20,6 +20,41 @@ function getPortFromPathOrDefault(){
 function toUpper(){
     echo $(echo $1 | tr [a-z] [A-Z])
 }
+
+function getTotalMem() {
+    echo `free -m | egrep "^Mem" | awk -F " " '{print $2}'`
+}
+function getSafeXmx() {
+    total=`getTotalMem`
+    HIGH_SAFE_PERCENT=70
+    LOW_SAFE_PERCENT=55
+    MAX_MEM=5120
+
+    if [ "$total" -gt 7168 ]
+    then
+      echo `expr $total \* $HIGH_SAFE_PERCENT / 100`
+    else
+      echo `expr $total \* $LOW_SAFE_PERCENT / 100`
+    fi
+}
+
+function getSafeXmn() {
+    xmx=$1
+    XMN_PERCENT=80
+    echo `expr $xmx \* $XMN_PERCENT / 100`
+}
+
+function getSafeMaxDirect() {
+    total=`getTotalMem`
+    SAFE_PERCENT=10
+    if [ "$total" -gt 7168 ]
+    then
+      echo 2048
+    else
+      echo `expr $total \* $SAFE_PERCENT / 100`
+    fi
+}
+
 function getEnv(){
     ENV=local
     if [ -f /opt/settings/server.properties ];then
@@ -61,6 +96,25 @@ function getCurrentRealPath(){
     dir="$( cd -P "$( dirname "$source" )" && pwd )"
     echo $dir
 }
+function trySaveHeapTrace() {
+    logdir=$1
+    suffix=`date +%Y%m%d%H%M%S`
+    if [[ -f "$logdir/heap_trace.txt" ]]; then
+        cp "$logdir/heap_trace.txt" "$logdir/heap_trace_$suffix.txt"
+    fi
+}
+
+function tryRemoveHeapTrace() {
+    logdir=$1
+    suffix=`date -d "$(date +%Y%m)01 last month" +%Y%m`
+    find "$logdir" -type f -name "heap_trace_$suffix*.txt" -delete
+}
+
+function tryRemoveJarLog() {
+    logdir=$1
+    appname=$2
+    find "$logdir" -type f -name "$appname_*.log" -delete
+}
 
 #VARS
 FULL_DIR=`getCurrentRealPath`
@@ -69,6 +123,9 @@ SERVER_PORT=`getPortFromPathOrDefault $FULL_DIR 8080`
 JMX_PORT=` expr $SERVER_PORT + 10000 `
 IP=`ifconfig | grep "inet.10" | awk '{print $2}; NR == 1 {exit}'`
 LOG_DIR=/opt/logs/100013684
+`trySaveHeapTrace ${LOG_DIR}`
+`tryRemoveHeapTrace ${LOG_DIR}`
+`tryRemoveJarLog ${LOG_DIR} ${SERVICE_NAME}`
 
 if [ ! $SERVER_PORT -eq 8080 ];then
     LOG_DIR=${LOG_DIR}_$SERVER_PORT
@@ -83,36 +140,26 @@ changePort $FULL_DIR/../$SERVICE_NAME.conf $SERVER_PORT
 #get total memory
 ENV=`getEnv`
 echo "current env:"$ENV
-if [ $ENV = "PRO" ]
-then
-    #GB
-    USED_MEM=5
-    XMN=3
-    #MB
-    MAX_DIRECT=2
-    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}g -Xmx${USED_MEM}g -Xmn${XMN}g -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}g"
-elif [ $ENV = "FWS" ] || [ $ENV = "FAT" ];then
-    #MB
-    USED_MEM=600
-    XMN=450
-    MAX_DIRECT=100
-    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m -Xmn${XMN}m -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m"
-else
-    #MB
-    USED_MEM=6
-    XMN=4
-    MAX_DIRECT=512
-    JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}g -Xmx${USED_MEM}g -Xmn${XMN}g -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m"
-fi
-export JAVA_OPTS="$JAVA_OPTS -Dio.netty.allocator.numDirectArenas=2 -Dio.netty.maxDirectMemory=0 -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=128m -XX:+UseParNewGC -XX:MaxTenuringThreshold=2 -XX:+UseConcMarkSweepGC -XX:+UseCMSInitiatingOccupancyOnly -XX:+ScavengeBeforeFullGC -XX:+UseCMSCompactAtFullCollection -XX:+CMSParallelRemarkEnabled -XX:CMSFullGCsBeforeCompaction=9 -XX:CMSInitiatingOccupancyFraction=60 -XX:-CMSClassUnloadingEnabled -XX:SoftRefLRUPolicyMSPerMB=0 -XX:-ReduceInitialCardMarks -XX:+CMSPermGenSweepingEnabled -XX:CMSInitiatingPermOccupancyFraction=70 -XX:+ExplicitGCInvokesConcurrent -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCApplicationConcurrentTime -XX:+PrintHeapAtGC -XX:+HeapDumpOnOutOfMemoryError -XX:-OmitStackTraceInFastThrow -Duser.timezone=Asia/Shanghai -Dclient.encoding.override=UTF-8 -Dfile.encoding=UTF-8 -Xloggc:$LOG_DIR/heap_trace.txt -XX:HeapDumpPath=$LOG_DIR/HeapDumpOnOutOfMemoryError/  -Dcom.sun.management.jmxremote.port=$JMX_PORT -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=${IP} -XX:+UnlockCommercialFeatures -XX:+FlightRecorder -Djava.security.egd=file:/dev/./urandom"
+  #MB
+  USED_MEM=`getSafeXmx`
+  XMN=`getSafeXmn $USED_MEM`
+  MAX_DIRECT=`getSafeMaxDirect`
+  JAVA_OPTS="$JAVA_OPTS -Xms${USED_MEM}m -Xmx${USED_MEM}m -Xmn${XMN}m -XX:+AlwaysPreTouch  -XX:MaxDirectMemorySize=${MAX_DIRECT}m"
+export JAVA_OPTS="-server $JAVA_OPTS -XX:+UnlockExperimentalVMOptions -XX:+UseZGC -XX:MaxTenuringThreshold=1 -Dio.netty.maxDirectMemory=0 -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=128m -XX:+HeapDumpOnOutOfMemoryError -XX:-OmitStackTraceInFastThrow -Duser.timezone=Asia/Shanghai -Dlog4j2.asyncLoggerRingBufferSize=32768 -Dclient.encoding.override=UTF-8 -Dfile.encoding=UTF-8 -Xlog:safepoint,classhisto*=trace,age*,gc*=info:file=$LOG_DIR/gc-%t.log:time,tid,tags:filecount=5,filesize=50m -XX:HeapDumpPath=$LOG_DIR/HeapDumpOnOutOfMemoryError/  -Dcom.sun.management.jmxremote.port=$JMX_PORT -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Djava.rmi.server.hostname=${IP} -XX:+FlightRecorder -Djava.security.egd=file:/dev/./urandom"
 
 echo $JAVA_OPTS
 
 PATH_TO_JAR=$SERVICE_NAME".jar"
-SERVER_URL="http://localhost:$SERVER_PORT/health"
+SERVER_URL="http://localhost:$SERVER_PORT"
 STARTUP_LOG=$LOG_DIR"/startup.logger"
 
-if [[ -z "$JAVA_HOME" && -d /usr/java/latest/ ]]; then
+ARCH=`uname -r`
+#set the jdk to 11/17 version
+if [[ -z "$JAVA_HOME" && "$ARCH" == *"aarch64" && -d /usr/java/jdk17/ ]]; then
+    export JAVA_HOME=/usr/java/jdk17
+elif [[ -z "$JAVA_HOME" && -d /usr/java/jdk11/ ]]; then
+    export JAVA_HOME=/usr/java/jdk11
+elif [[ -z "$JAVA_HOME" && -d /usr/java/latest/ ]]; then
     export JAVA_HOME=/usr/java/latest/
 fi
 
@@ -162,7 +209,7 @@ declare -i max_counter=16 # 16*5=80s
 declare -i total_time=0
 
 printf "Waiting for server startup" >> $STARTUP_LOG
-until [[ (( counter -ge max_counter )) || "$(curl -X GET --silent --connect-timeout 1 --head $SERVER_URL | grep "Coyote")" != "" ]];
+until [[ (( counter -ge max_counter )) || "$(curl -X GET --silent --connect-timeout 1 --head $SERVER_URL/health | grep "HTTP/1.1 200")" != "" ]];
 do
     printf "." >> $STARTUP_LOG
     counter+=1

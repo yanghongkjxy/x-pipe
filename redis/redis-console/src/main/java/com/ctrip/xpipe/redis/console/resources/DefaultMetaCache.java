@@ -1,84 +1,120 @@
 package com.ctrip.xpipe.redis.console.resources;
 
-import com.ctrip.xpipe.api.foundation.FoundationService;
 import com.ctrip.xpipe.api.monitor.Task;
 import com.ctrip.xpipe.api.monitor.TransactionMonitor;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
-import com.ctrip.xpipe.endpoint.HostPort;
+import com.ctrip.xpipe.cache.TimeBoundCache;
+import com.ctrip.xpipe.redis.console.cluster.ConsoleLeaderAware;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
-import com.ctrip.xpipe.redis.console.model.DcTbl;
-import com.ctrip.xpipe.redis.console.service.DcService;
+import com.ctrip.xpipe.redis.console.exception.DataNotFoundException;
+import com.ctrip.xpipe.redis.console.model.RedisCheckRuleTbl;
+import com.ctrip.xpipe.redis.console.service.ClusterService;
+import com.ctrip.xpipe.redis.console.service.KeeperContainerService;
+import com.ctrip.xpipe.redis.console.service.RedisCheckRuleService;
 import com.ctrip.xpipe.redis.console.service.meta.DcMetaService;
-import com.ctrip.xpipe.redis.core.entity.*;
+import com.ctrip.xpipe.redis.core.entity.DcMeta;
+import com.ctrip.xpipe.redis.core.entity.RedisCheckRuleMeta;
+import com.ctrip.xpipe.redis.core.entity.RouteMeta;
+import com.ctrip.xpipe.redis.core.entity.XpipeMeta;
+import com.ctrip.xpipe.redis.core.meta.MetaCache;
 import com.ctrip.xpipe.redis.core.meta.XpipeMetaManager;
-import com.ctrip.xpipe.redis.core.meta.impl.DefaultXpipeMetaManager;
-import com.ctrip.xpipe.spring.AbstractProfile;
-import com.ctrip.xpipe.tuple.Pair;
-import com.ctrip.xpipe.utils.IpUtils;
-import com.ctrip.xpipe.utils.StringUtil;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.ctrip.xpipe.redis.core.route.RouteChooseStrategy;
+import com.ctrip.xpipe.redis.core.route.RouteChooseStrategyFactory;
+import com.ctrip.xpipe.utils.ObjectUtils;
+import com.ctrip.xpipe.utils.VisibleForTesting;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.context.annotation.Profile;
-import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
 
 /**
  * @author wenchao.meng
  *         <p>
  *         Mar 31, 2017
  */
-@Component
-@Lazy
-@Profile(AbstractProfile.PROFILE_NAME_PRODUCTION)
-public class DefaultMetaCache implements MetaCache {
+public class DefaultMetaCache extends AbstractMetaCache implements MetaCache, ConsoleLeaderAware {
 
     private int refreshIntervalMilli = 2000;
 
-    private Logger logger = LoggerFactory.getLogger(getClass());
-
-    private static final String CONSOLE_IDC = FoundationService.DEFAULT.getDataCenter();
+    @Autowired
+    private RedisCheckRuleService redisCheckRuleService;
 
     @Autowired
     private DcMetaService dcMetaService;
 
     @Autowired
-    private DcService dcService;
+    private ClusterService clusterService;
+
+    @Autowired
+    private KeeperContainerService keeperContainerService;
 
     @Autowired
     private ConsoleConfig consoleConfig;
 
-    private Pair<XpipeMeta, XpipeMetaManager> meta;
+    @Autowired
+    private RouteChooseStrategyFactory routeChooseStrategyFactory;
+
+    private RouteChooseStrategy strategy = null;
+
+    private List<Set<String>> clusterParts;
+
+    private List<Set<Long>> keeperContainerParts;
+
+    private List<TimeBoundCache<String>> xmlFormatXPipeMetaParts = null;
 
     private ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1);
 
-    private Map<String, Pair<String, String>> monitor2ClusterShard;
+    private ScheduledFuture<?> future;
 
-    public DefaultMetaCache() {
+    private AtomicBoolean taskTrigger = new AtomicBoolean(false);
 
+    @Override
+    public void isleader() {
+        if (taskTrigger.compareAndSet(false, true)) {
+            stopLoadMeta();
+            startLoadMeta();
+        }
     }
 
-    @PostConstruct
-    public void postConstruct() {
+    @Override
+    public void notLeader() {
+        if (taskTrigger.compareAndSet(true, false))
+            stopLoadMeta();
+    }
 
-        logger.info("[postConstruct]{}", this);
+    private synchronized void stopLoadMeta(){
+        logger.info("[loadMeta][stop]{}", this);
+        if (future != null)
+            future.cancel(true);
+        future = null;
+
+        clusterParts = null;
+        meta = null;
+        monitor2ClusterShard = null;
+        allKeepers = null;
+        allKeeperSize = DEFAULT_KEEPER_NUMBERS;
+        lastUpdateTime = 0;
+    }
+
+    public void startLoadMeta() {
+        logger.info("[loadMeta][start]{}", this);
 
         refreshIntervalMilli = consoleConfig.getCacheRefreshInterval();
 
-        scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
+        future = scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
             @Override
             protected void doRun() throws Exception {
+                if(!taskTrigger.get())
+                    return;
                 loadCache();
             }
+
         }, 1000, refreshIntervalMilli, TimeUnit.MILLISECONDS);
     }
 
@@ -89,223 +125,133 @@ public class DefaultMetaCache implements MetaCache {
         }
     }
 
-    private void loadCache() throws Exception {
-
+    void loadCache() throws Exception {
 
         TransactionMonitor.DEFAULT.logTransaction("MetaCache", "load", new Task() {
 
             @Override
             public void go() throws Exception {
 
-                List<DcTbl> dcs = dcService.findAllDcNames();
-                List<DcMeta> dcMetas = new LinkedList<>();
-                for (DcTbl dc : dcs) {
-                    dcMetas.add(dcMetaService.getDcMeta(dc.getDcName()));
+                Map<String, DcMeta> dcMetaMap = dcMetaService.getAllDcMetas();
+                List<DcMeta> dcMetas = new ArrayList<>(dcMetaMap.values());
+
+                List<RedisCheckRuleTbl> redisCheckRuleTbls = redisCheckRuleService.getAllRedisCheckRules();
+                List<RedisCheckRuleMeta> redisCheckRuleMetas = new LinkedList<>();
+
+                for(RedisCheckRuleTbl redisCheckRuleTbl : redisCheckRuleTbls) {
+                    RedisCheckRuleMeta redisCheckRuleMeta = new RedisCheckRuleMeta();
+                    redisCheckRuleMeta.setId(redisCheckRuleTbl.getId())
+                            .setCheckType(redisCheckRuleTbl.getCheckType())
+                            .setParam(redisCheckRuleTbl.getParam());
+
+                    redisCheckRuleMetas.add(redisCheckRuleMeta);
                 }
 
-                XpipeMeta xpipeMeta = createXpipeMeta(dcMetas);
-                Pair<XpipeMeta, XpipeMetaManager> meta = new Pair<>(xpipeMeta, new DefaultXpipeMetaManager(xpipeMeta));
-                DefaultMetaCache.this.meta = meta;
-                monitor2ClusterShard = Maps.newHashMap();
+                synchronized (this) {
+                    refreshMetaParts();
+                    XpipeMeta xpipeMeta = createXpipeMeta(dcMetas, redisCheckRuleMetas);
+                    refreshMeta(xpipeMeta);
+                }
+            }
+
+            @Override
+            public Map getData() {
+                return null;
             }
         });
     }
 
-    @Override
-    public XpipeMeta getXpipeMeta() {
+    private void refreshMetaParts() {
         try {
-            return meta.getKey();
-        } catch (Exception e) {
-            logger.debug("[getXpipeMeta]", e);
-        }
-        return null;
-    }
+            int parts = Math.max(1, consoleConfig.getClusterDividedParts());
+            logger.debug("[refreshClusterParts] start parts {}", parts);
 
-
-    private XpipeMeta createXpipeMeta(List<DcMeta> dcMetas){
-
-        XpipeMeta xpipeMeta = new XpipeMeta();
-        for (DcMeta dcMeta : dcMetas) {
-            xpipeMeta.addDc(dcMeta);
-        }
-        return xpipeMeta;
-
-    }
-
-    @Override
-    public boolean inBackupDc(HostPort hostPort) {
-
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
-        XpipeMetaManager.MetaDesc metaDesc = xpipeMetaManager.findMetaDesc(hostPort);
-        if (metaDesc == null) {
-            throw new IllegalStateException("unfound shard for instance:" + hostPort);
-        }
-
-        String instanceInDc = metaDesc.getDcId();
-        String activeDc = metaDesc.getActiveDc();
-        return !activeDc.equalsIgnoreCase(instanceInDc);
-    }
-
-    @Override
-    public HostPort findMasterInSameShard(HostPort hostPort) {
-
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
-        XpipeMetaManager.MetaDesc metaDesc = xpipeMetaManager.findMetaDesc(hostPort);
-        if (metaDesc == null) {
-            throw new IllegalStateException("unfound shard for instance:" + hostPort);
-        }
-
-        String clusterName = metaDesc.getClusterId();
-        String shardName = metaDesc.getShardId();
-
-        Pair<String, RedisMeta> redisMaster = xpipeMetaManager.getRedisMaster(clusterName, shardName);
-        // could be null if no master in a shard
-        if(redisMaster == null) {
-            return null;
-        }
-        RedisMeta redisMeta = redisMaster.getValue();
-        return new HostPort(redisMeta.getIp(), redisMeta.getPort());
-    }
-
-    @Override
-    public Pair<String, String> findClusterShard(HostPort hostPort) {
-
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
-
-        XpipeMetaManager.MetaDesc metaDesc = xpipeMetaManager.findMetaDesc(hostPort);
-        if (metaDesc == null) {
-            return null;
-        }
-
-        return new Pair<>(metaDesc.getClusterId(), metaDesc.getShardId());
-    }
-
-    @Override
-    public RouteMeta getRouteIfPossible(HostPort hostPort) {
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
-        XpipeMetaManager.MetaDesc metaDesc = xpipeMetaManager.findMetaDesc(hostPort);
-        return xpipeMetaManager
-                .consoleRandomRoute(CONSOLE_IDC, XpipeMetaManager.ORG_ID_FOR_SHARED_ROUTES, metaDesc.getDcId());
-    }
-
-    @Override
-    public List<HostPort> getAllRedisOfDc(String dcId) {
-        List<HostPort> result = Lists.newLinkedList();
-        try {
-            for(ClusterMeta clusterMeta : meta.getKey().findDc(dcId).getClusters().values()) {
-                for (ShardMeta shardMeta : clusterMeta.getShards().values()) {
-                    for(RedisMeta redis : shardMeta.getRedises()) {
-                        result.add(new HostPort(redis.getIp(), redis.getPort()));
-                    }
-                }
+            List<Set<String>> newClusterParts = clusterService.divideClusters(parts);
+            if (newClusterParts.size() < parts) {
+                logger.info("[refreshClusterParts] skip for parts miss, expect {}, actual {}", parts, newClusterParts.size());
+                return;
             }
-        } catch (Exception e) {
-            logger.error("[getRedisNumOfDc]", e);
-        }
-        return result;
-    }
+            List<Set<Long>> newKeeperContainerParts = keeperContainerService.divideKeeperContainers(parts);
+            if (newKeeperContainerParts.size() < parts) {
+                logger.info("[refreshKeeperContainerParts] skip for parts miss, expect {}, actual {}",
+                        parts, newKeeperContainerParts.size());
+                return;
+            }
 
-    @Override
-    public Set<HostPort> allKeepers(){
+            this.clusterParts = newClusterParts;
+            this.keeperContainerParts = newKeeperContainerParts;
 
-        Set<HostPort> result = new HashSet<>();
-        XpipeMeta xpipeMeta = getXpipeMeta();
-
-        xpipeMeta.getDcs().forEach((dcName, dcMeta) -> {
-            dcMeta.getClusters().forEach((clusterName, clusterMeta) -> {
-                clusterMeta.getShards().forEach((shardName, shardMeta) -> {
-                    shardMeta.getKeepers().forEach(keeperMeta -> {
-                        result.add(new HostPort(keeperMeta.getIp(), keeperMeta.getPort()));
-                    });
-                });
+            List<TimeBoundCache<String>> localXPipeMetaParts = new ArrayList<>();
+            IntStream.range(0, consoleConfig.getClusterDividedParts()).forEach(i -> {
+                // using as lazy-load cache
+                localXPipeMetaParts.add(new TimeBoundCache<>(() -> Long.MAX_VALUE, () -> getDividedXpipeMeta(i).toString()));
             });
-        });
-
-        return result;
+            this.xmlFormatXPipeMetaParts = localXPipeMetaParts;
+        } catch (Throwable th) {
+            logger.warn("[refreshClusterParts] fail", th);
+        }
     }
 
+    @Override
+    public Map<String, RouteMeta> chooseDefaultRoutes(String clusterName, String srcDc, List<String> dstDcs, int orgId) {
+        return chooseRoutes(clusterName, srcDc, dstDcs, orgId, false);
+    }
 
     @Override
-    public String getSentinelMonitorName(String clusterId, String shardId) {
+    public Map<String, RouteMeta> chooseRoutes(String clusterName, String srcDc, List<String> dstDcs, int orgId) {
+        return chooseRoutes(clusterName, srcDc, dstDcs, orgId, true);
+    }
 
+    private Map<String, RouteMeta> chooseRoutes(String clusterName, String srcDc, List<String> dstDcs, int orgId, boolean useClusterPrioritizedRoutes) {
         XpipeMetaManager xpipeMetaManager = meta.getValue();
+        RouteChooseStrategyFactory.RouteStrategyType routeStrategyType =
+                RouteChooseStrategyFactory.RouteStrategyType.lookup(consoleConfig.getChooseRouteStrategyType());
 
-        Set<String> dcs = xpipeMetaManager.getDcs();
-        for (String dc : dcs) {
-            ShardMeta shardMeta = xpipeMetaManager.getShardMeta(dc, clusterId, shardId);
-            if (shardMeta != null) {
-                return shardMeta.getSentinelMonitorName();
-            }
+        return xpipeMetaManager.chooseMetaRoutes(clusterName, srcDc, dstDcs, orgId, getRouteChooseStrategy(routeStrategyType), useClusterPrioritizedRoutes);
+    }
+
+    private RouteChooseStrategy getRouteChooseStrategy(RouteChooseStrategyFactory.RouteStrategyType routeStrategyType) {
+        RouteChooseStrategy localStrategy = strategy;
+        if(null == localStrategy || !ObjectUtils.equals(routeStrategyType, localStrategy.getRouteStrategyType())) {
+            localStrategy = routeChooseStrategyFactory.create(routeStrategyType);
+            strategy = localStrategy;
         }
-        return null;
+
+        return localStrategy;
     }
 
     @Override
-    public Set<HostPort> getActiveDcSentinels(String clusterId, String shardId) {
+    public synchronized XpipeMeta getDividedXpipeMeta(int partIndex) {
+        if (null == meta || null == clusterParts) throw new DataNotFoundException("data not ready");
+        if (partIndex >= clusterParts.size() || partIndex >= keeperContainerParts.size())
+            throw new DataNotFoundException("no part " + partIndex);
 
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
+        XpipeMeta xpipeMeta = getXpipeMeta();
+        Set<String> requestClusters = clusterParts.get(partIndex);
+        Set<Long> requestKeeperContainers = keeperContainerParts.get(partIndex);
 
-        String activeDc = xpipeMetaManager.getActiveDc(clusterId, shardId);
-        SentinelMeta sentinel = xpipeMetaManager.getSentinel(activeDc, clusterId, shardId);
 
-        return new HashSet<>(IpUtils.parseAsHostPorts(sentinel.getAddress()));
+        return createDividedMeta(xpipeMeta, requestClusters, requestKeeperContainers);
     }
 
     @Override
-    public HostPort findMaster(String clusterId, String shardId) throws MasterNotFoundException {
-
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
-        Pair<String, RedisMeta> redisMaster = xpipeMetaManager.getRedisMaster(clusterId, shardId);
-        if (redisMaster == null) {
-            throw new MasterNotFoundException(clusterId, shardId);
+    public String getXmlFormatDividedXpipeMeta(int partIndex) {
+        List<TimeBoundCache<String>> localParts = this.xmlFormatXPipeMetaParts;
+        if (null == localParts) throw new DataNotFoundException("data not ready");
+        if (partIndex >= localParts.size()) {
+            throw new DataNotFoundException("no part " + partIndex);
         }
-        return new HostPort(redisMaster.getValue().getIp(), redisMaster.getValue().getPort());
+
+        return localParts.get(partIndex).getData();
     }
 
-    @Override
-    public String getDc(HostPort hostPort) {
-
-        XpipeMetaManager xpipeMetaManager = meta.getValue();
-        XpipeMetaManager.MetaDesc metaDesc = xpipeMetaManager.findMetaDesc(hostPort);
-
-        if (metaDesc == null) {
-            throw new IllegalStateException("unfound shard for instance:" + hostPort);
-        }
-        return metaDesc.getDcId();
+    @VisibleForTesting
+    ScheduledFuture<?> getFuture() {
+        return future;
     }
 
-    @Override
-    public Pair<String, String> findClusterShardBySentinelMonitor(String monitor) {
-        if(StringUtil.isEmpty(monitor)) {
-            return null;
-        }
-
-        Pair<String, String> clusterShard = monitor2ClusterShard.get(monitor);
-        if(clusterShard != null) {
-            return clusterShard;
-        }
-
-        try {
-            XpipeMeta xpipeMeta = meta.getKey();
-            for (DcMeta dcMeta : xpipeMeta.getDcs().values()) {
-                for (ClusterMeta clusterMeta : dcMeta.getClusters().values()) {
-                    for (ShardMeta shardMeta : clusterMeta.getShards().values()) {
-
-                        monitor2ClusterShard.put(shardMeta.getSentinelMonitorName(),
-                                new Pair<>(clusterMeta.getId(), shardMeta.getId()));
-
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.error("[findClusterShardBySentinelMonitor]", e);
-        }
-        return monitor2ClusterShard.get(monitor);
-    }
-
-    @Override
-    public String getActiveDc(String clusterId, String shardId){
-        XpipeMetaManager xpipeMetaManager  =  meta.getValue();
-        return xpipeMetaManager.getActiveDc(clusterId, shardId);
+    @VisibleForTesting
+    AtomicBoolean getTaskTrigger() {
+        return taskTrigger;
     }
 }

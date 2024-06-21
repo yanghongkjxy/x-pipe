@@ -1,7 +1,8 @@
 package com.ctrip.xpipe.redis.integratedtest;
 
 
-import com.ctrip.xpipe.redis.integratedtest.console.TestShutDown;
+import com.ctrip.xpipe.redis.integratedtest.checker.CheckerAllTest;
+import com.ctrip.xpipe.redis.integratedtest.metaserver.MetaServerAllTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
 import org.junit.runners.Suite.SuiteClasses;
@@ -13,8 +14,10 @@ import org.junit.runners.Suite.SuiteClasses;
  */
 @RunWith(Suite.class)
 @SuiteClasses({
-	TestShutDown.class
+	CheckerAllTest.class, 
+	MetaServerAllTest.class,
 })
 public class AllTesters {
 
+    /* add -Djdk.attach.allowAttachSelf=true for jdk11*/
 }

@@ -2,15 +2,19 @@ package com.ctrip.xpipe.redis.core.proxy.monitor;
 
 import com.ctrip.xpipe.exception.XpipeRuntimeException;
 
+import java.io.Serializable;
 import java.util.Objects;
 
-public class TunnelTrafficResult {
+public class TunnelTrafficResult implements Serializable {
 
     private String tunnelId;
 
     private SessionTrafficResult frontend;
 
     private SessionTrafficResult backend;
+
+    public TunnelTrafficResult() {
+    }
 
     public TunnelTrafficResult(String tunnelId, SessionTrafficResult frontendResult,
                                SessionTrafficResult backendResult) {
@@ -56,6 +60,21 @@ public class TunnelTrafficResult {
         return backend;
     }
 
+    public TunnelTrafficResult setTunnelId(String tunnelId) {
+        this.tunnelId = tunnelId;
+        return this;
+    }
+
+    public TunnelTrafficResult setFrontend(SessionTrafficResult frontend) {
+        this.frontend = frontend;
+        return this;
+    }
+
+    public TunnelTrafficResult setBackend(SessionTrafficResult backend) {
+        this.backend = backend;
+        return this;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -69,5 +88,14 @@ public class TunnelTrafficResult {
     @Override
     public int hashCode() {
         return Objects.hash(tunnelId, frontend, backend);
+    }
+
+    @Override
+    public TunnelTrafficResult clone() {
+        TunnelTrafficResult clone = new TunnelTrafficResult();
+        clone.tunnelId = this.tunnelId;
+        if (null != this.frontend) clone.frontend = this.frontend.clone();
+        if (null != this.backend) clone.backend = this.backend.clone();
+        return clone;
     }
 }

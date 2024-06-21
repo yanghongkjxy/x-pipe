@@ -1,7 +1,9 @@
 package com.ctrip.xpipe.redis.core.protocal.cmd;
 
+import com.ctrip.xpipe.api.payload.InOutPayload;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.netty.commands.NettyClient;
+import com.ctrip.xpipe.payload.DirectByteBufInStringOutPayload;
 
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -30,7 +32,8 @@ public abstract class AbstractConfigCommand<T> extends AbstractRedisCommand<T>{
 		DISKLESS_SYNC_DELAY("repl-diskless-sync-delay"),
 		SLAVE_READONLY("slave-read-only"),
 
-		SLAVE_REPL_ALL("slave-repl-all")//extend for xredis
+		SLAVE_REPL_ALL("slave-repl-all"), //extend for xredis
+		RORDB_SYNC("swap-repl-rordb-sync") // extend for ror
 		;
 		
 		private String configName;
@@ -45,4 +48,8 @@ public abstract class AbstractConfigCommand<T> extends AbstractRedisCommand<T>{
 		
 	}
 
+	@Override
+	protected InOutPayload getBulkStringPayload() {
+		return new DirectByteBufInStringOutPayload();
+	}
 }

@@ -2,7 +2,11 @@ package com.ctrip.xpipe.redis.core.meta;
 
 
 import com.ctrip.xpipe.api.codec.Codec;
+import com.ctrip.xpipe.redis.core.entity.ApplierMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
+import com.ctrip.xpipe.redis.core.store.ClusterId;
+import com.ctrip.xpipe.redis.core.store.ReplId;
+import com.ctrip.xpipe.redis.core.store.ShardId;
 
 /**
  * meta related zk config information
@@ -31,19 +35,56 @@ public class MetaZkConfig {
 	public static String getZkLeaderLatchRootPath() {
 		return System.getProperty("zkLeaderLatchRootPath", "/keepers");
 	}
+
+	public static String getApplierZkLeaderLatchRootPath() {
+		return System.getProperty("applierZkLeaderLatchRootPath", "/appliers");
+	}
+
+	public static String getKeeperLeaderLatchPath(ClusterId clusterId, ShardId shardId){
+		return getKeeperLeaderLatchPath(clusterId.toString(), shardId.toString());
+	}
 	
 	public static String getKeeperLeaderLatchPath(String clusterId, String shardId){
 		
 		String path = String.format("%s/%s/%s", getZkLeaderLatchRootPath(), clusterId, shardId);
 		return path;
 	}
-	
+
+	public static String getApplierLeaderLatchPath(ClusterId clusterId, ShardId shardId){
+		return getApplierLeaderLatchPath(clusterId.toString(), shardId.toString());
+	}
+
+	public static String getApplierLeaderLatchPath(String clusterId, String shardId){
+
+		String path = String.format("%s/%s/%s", getApplierZkLeaderLatchRootPath(), clusterId, shardId);
+		return path;
+	}
+
+	public static String getKeeperLeaderLatchPath(long replId){
+		return String.format("%s/repl_%d", getZkLeaderLatchRootPath(), replId);
+	}
+
+	public static String getKeeperLeaderLatchPath(ReplId replId){
+		return String.format("%s/%s", getZkLeaderLatchRootPath(), replId.toString());
+	}
+
+	public static String getKeeperLeaderLatchPath(long clusterDbId, long shardDbId) {
+		return String.format("%s/cluster_%d/shard_%d", getZkLeaderLatchRootPath(), clusterDbId, shardDbId);
+	}
+
+	public static String getApplierLeaderLatchPath(long clusterDbId, long shardDbId) {
+		return String.format("%s/cluster_%d/shard_%d", getApplierZkLeaderLatchRootPath(), clusterDbId, shardDbId);
+	}
+
 	public static String getKeeperLeaderElectionId(KeeperMeta currentKeeperMeta){
 		
 		String leaderElectionID = Codec.DEFAULT.encode(currentKeeperMeta);
 		return leaderElectionID;
 	}
-	
 
-	
+	public static String getApplierLeaderElectionId(ApplierMeta currentApplierMeta){
+
+		String leaderElectionID = Codec.DEFAULT.encode(currentApplierMeta);
+		return leaderElectionID;
+	}
 }

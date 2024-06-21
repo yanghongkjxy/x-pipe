@@ -1,6 +1,7 @@
 package com.ctrip.xpipe.redis.console.notifier.cluster;
 
 import com.ctrip.xpipe.api.observer.Observer;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.redis.console.notifier.shard.ShardEvent;
 import com.ctrip.xpipe.utils.StringUtil;
@@ -19,14 +20,19 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
 
     private String clusterName;
 
+    private long orgId;
+
     private List<ShardEvent> shardEvents;
 
     private List<Observer> observers;
 
     private ExecutorService executor;
 
-    protected AbstractClusterEvent(String clusterName, ExecutorService executor) {
+    private ClusterType clusterType;
+
+    protected AbstractClusterEvent(String clusterName, long orgId, ExecutorService executor) {
         this.clusterName = clusterName;
+        this.orgId = orgId;
         this.executor = executor;
         this.shardEvents = Lists.newLinkedList();
         this.observers = Lists.newArrayListWithExpectedSize(5);
@@ -35,6 +41,11 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
     @Override
     public String getClusterName() {
         return this.clusterName;
+    }
+
+    @Override
+    public long getOrgId() {
+        return this.orgId;
     }
 
     @Override
@@ -62,7 +73,7 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
             executor.execute(new AbstractExceptionLogTask() {
                 @Override
                 protected void doRun() throws Exception {
-                    logger.info("[onEvent] execute observer: {}", observer.getClass());
+                    getLogger().info("[onEvent] execute observer: {}", observer.getClass());
                     observer.update(getClusterEventType(), getSelf());
                 }
             });
@@ -95,6 +106,15 @@ public abstract class AbstractClusterEvent implements ClusterEvent {
         for(ShardEvent shardEvent : shardEvents) {
             addShardEvent(shardEvent);
         }
+    }
+
+    public void setClusterType(ClusterType clusterType) {
+        this.clusterType = clusterType;
+    }
+
+    @Override
+    public ClusterType getClusterType() {
+        return clusterType;
     }
 
     protected abstract ClusterEvent getSelf();

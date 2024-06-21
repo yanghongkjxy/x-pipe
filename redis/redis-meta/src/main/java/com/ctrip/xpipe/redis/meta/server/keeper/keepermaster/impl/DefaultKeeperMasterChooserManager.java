@@ -2,14 +2,14 @@ package com.ctrip.xpipe.redis.meta.server.keeper.keepermaster.impl;
 
 
 import com.ctrip.xpipe.api.lifecycle.TopElement;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.pool.XpipeNettyClientKeyedObjectPool;
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.ShardMeta;
 import com.ctrip.xpipe.redis.core.meta.comparator.ClusterMetaComparator;
-import com.ctrip.xpipe.redis.core.meta.comparator.ShardMetaComparator.ShardUpstreamChanged;
 import com.ctrip.xpipe.redis.meta.server.keeper.KeeperMasterElector;
 import com.ctrip.xpipe.redis.meta.server.keeper.impl.AbstractCurrentMetaObserver;
-import com.ctrip.xpipe.redis.meta.server.keeper.keepermaster.KeeperMasterChooser;
+import com.ctrip.xpipe.redis.meta.server.keeper.keepermaster.MasterChooser;
 import com.ctrip.xpipe.redis.meta.server.meta.DcMetaCache;
 import com.ctrip.xpipe.redis.meta.server.multidc.MultiDcService;
 import com.ctrip.xpipe.utils.OsUtils;
@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
+import java.util.Collections;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -47,19 +49,12 @@ public class DefaultKeeperMasterChooserManager extends AbstractCurrentMetaObserv
 		scheduled = Executors.newScheduledThreadPool(OsUtils.getCpuCount(), XpipeThreadFactory.create("DefaultKeeperMasterChooserManager"));
 	}
 
-	
-	protected void shardUpstreamChanged(ShardUpstreamChanged args) {
-
-		logger.info("[shardUpstreamChanged]{}", args);
-		currentMetaManager.setKeeperMaster(args.getClusterId(), args.getShardId(), args.getFuture());
-	}
-
 	@Override
 	protected void handleClusterModified(ClusterMetaComparator comparator) {
 		
-		String clusterId = comparator.getCurrent().getId();
+		Long clusterDbId = comparator.getCurrent().getDbId();
 		for(ShardMeta shardMeta : comparator.getAdded()){
-			addShard(clusterId, shardMeta);
+			addShard(clusterDbId, shardMeta);
 		}
 
 	}
@@ -72,26 +67,32 @@ public class DefaultKeeperMasterChooserManager extends AbstractCurrentMetaObserv
 	@Override
 	protected void handleClusterAdd(ClusterMeta clusterMeta) {
 		
-		for(ShardMeta shardMeta : clusterMeta.getShards().values()){
-			addShard(clusterMeta.getId(), shardMeta);
+		for(ShardMeta shardMeta : clusterMeta.getAllShards().values()){
+			addShard(clusterMeta.getDbId(), shardMeta);
 		}
 		
 	}
-	private void addShard(String clusterId, ShardMeta shardMeta) {
+
+	@Override
+	public Set<ClusterType> getSupportClusterTypes() {
+		return Collections.singleton(ClusterType.ONE_WAY);
+	}
+
+	private void addShard(Long clusterDbId, ShardMeta shardMeta) {
 		
-		String shardId = shardMeta.getId();
+		Long shardDbId = shardMeta.getDbId();
 		
-		KeeperMasterChooser keeperMasterChooser = new DefaultDcKeeperMasterChooser(clusterId, shardId, multiDcService, 
+		MasterChooser keeperMasterChooser = new DefaultDcKeeperMasterChooser(clusterDbId, shardDbId, multiDcService,
 				dcMetaCache, currentMetaManager, scheduled, clientPool);
 		
 		
 		try {
-			logger.info("[addShard]{}, {}, {}", clusterId, shardId, keeperMasterChooser);
+			logger.info("[addShard]cluster_{}, shard_{}, {}", clusterDbId, shardDbId, keeperMasterChooser);
 			keeperMasterChooser.start();
 			//release resources
-			currentMetaManager.addResource(clusterId, shardId, keeperMasterChooser);
+			registerJob(clusterDbId, shardDbId, keeperMasterChooser);
 		} catch (Exception e) {
-			logger.error("[addShard]{}, {}", clusterId, shardId);
+			logger.error("[addShard]cluster_{}, shard_{}", clusterDbId, shardDbId);
 		}
 	}
 

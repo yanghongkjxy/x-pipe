@@ -8,7 +8,7 @@ import com.ctrip.xpipe.redis.meta.server.multidc.MultiDcService;
 import org.junit.Before;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 /**
  * @author wenchao.meng
@@ -26,6 +26,11 @@ public class AbstractDcKeeperMasterChooserTest extends AbstractMetaServerTest{
 	
 	protected String shardId = "shard1";
 
+	protected Long clusterDbId = 1L;
+
+	protected Long clusterHeteroId = 7L;
+
+	protected Long shardDbId = 1L;
 	
 	@Mock
 	protected DcMetaCache dcMetaCache;

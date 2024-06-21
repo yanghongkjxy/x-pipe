@@ -1,26 +1,32 @@
 package com.ctrip.xpipe.redis.integratedtest;
 
 import com.ctrip.xpipe.api.cluster.LeaderElectorManager;
+import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.cluster.DefaultLeaderElectorManager;
+import com.ctrip.xpipe.endpoint.DefaultEndPoint;
+import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.redis.core.AbstractRedisTest;
-import com.ctrip.xpipe.redis.core.config.MetaServerAddressAware;
 import com.ctrip.xpipe.redis.core.entity.*;
 import com.ctrip.xpipe.redis.core.meta.MetaUtils;
-import com.ctrip.xpipe.redis.core.metaserver.DefaultMetaServerLocator;
-import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
-import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
-import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpointManager;
-import com.ctrip.xpipe.redis.core.proxy.endpoint.NaiveNextHopAlgorithm;
-import com.ctrip.xpipe.redis.core.proxy.resource.KeeperProxyResourceManager;
+import com.ctrip.xpipe.redis.core.protocal.cmd.InfoCommand;
+import com.ctrip.xpipe.redis.core.protocal.cmd.InfoResultExtractor;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOpParser;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOpParserFactory;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOpParserManager;
+import com.ctrip.xpipe.redis.core.redis.operation.parser.*;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.config.DefaultKeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.DefaultKeeperResourceManager;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
+import com.ctrip.xpipe.redis.keeper.config.KeeperResourceManager;
 import com.ctrip.xpipe.redis.keeper.impl.DefaultRedisKeeperServer;
-import com.ctrip.xpipe.redis.keeper.meta.DefaultMetaService;
 import com.ctrip.xpipe.redis.keeper.monitor.KeepersMonitorManager;
 import com.ctrip.xpipe.redis.keeper.monitor.impl.NoneKeepersMonitorManager;
 import com.ctrip.xpipe.redis.meta.server.job.XSlaveofJob;
+import com.ctrip.xpipe.utils.DefaultLeakyBucket;
+import com.ctrip.xpipe.zk.ZkConfig;
 import com.ctrip.xpipe.zk.impl.DefaultZkClient;
+import com.ctrip.xpipe.zk.impl.DefaultZkConfig;
 import com.google.common.collect.Lists;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
@@ -35,6 +41,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.util.*;
 
 /**
@@ -54,12 +61,13 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 
 	private String clusterId = "cluster1", shardId = "shard1";
 
+	private Long clusterDbId = 1L, shardDbId = 1L, replId = 1L;
+
 	private int defaultTestMessageCount = 5000;
 
 	private Set<RedisMeta> allRedisStarted = new HashSet<>();
 
-	protected ProxyResourceManager proxyResourceManager = new KeeperProxyResourceManager(
-			new DefaultProxyEndpointManager(()->1000), new NaiveNextHopAlgorithm());
+	protected KeeperResourceManager resourceManager = new DefaultKeeperResourceManager(new DefaultLeakyBucket(100));
 
 	@BeforeClass
 	public static void beforereAbstractIntegratedTestClass(){
@@ -119,37 +127,81 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 		startZk(zkPort);
 	}
 
-	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta, MetaServerKeeperService metaService,
+	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta,
 			LeaderElectorManager leaderElectorManager) throws Exception {
 
-		return startKeeper(keeperMeta, getKeeperConfig(), metaService, leaderElectorManager);
+		return startKeeper(keeperMeta, getKeeperConfig(), leaderElectorManager);
+	}
+
+	protected RedisKeeperServer startGtidKeeper(KeeperMeta keeperMeta,
+													LeaderElectorManager leaderElectorManager,
+													RedisOpParser redisOpParser) throws Exception {
+		return startGtidKeeper(keeperMeta, getKeeperConfig(), leaderElectorManager, redisOpParser);
 	}
 
 	protected KeeperConfig getKeeperConfig() {
 		return new DefaultKeeperConfig();
 	}
 
-	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta, KeeperConfig keeperConfig, MetaServerKeeperService metaService,
+	protected RedisKeeperServer startGtidKeeper(KeeperMeta keeperMeta, KeeperConfig keeperConfig,
+												LeaderElectorManager leaderElectorManager,
+												RedisOpParser redisOpParser) throws Exception {
+
+		logger.info(remarkableMessage("[startGtidKeeper]{}, {}"), keeperMeta);
+		File baseDir = new File(getTestFileDir() + "/replication_store_" + keeperMeta.getPort());
+
+		RedisKeeperServer gtidRedisKeeperServer = createGtidRedisKeeperServer(keeperMeta, baseDir, keeperConfig,
+				leaderElectorManager, new NoneKeepersMonitorManager(), redisOpParser);
+		add(gtidRedisKeeperServer);
+		return gtidRedisKeeperServer;
+	}
+
+	protected RedisOpParser createRedisOpParser() {
+		RedisOpParserManager redisOpParserManager = new DefaultRedisOpParserManager();
+		RedisOpParserFactory.getInstance().registerParsers(redisOpParserManager);
+		RedisOpParser parser = new GeneralRedisOpParser(redisOpParserManager);
+		return parser;
+	}
+
+	protected RedisKeeperServer startKeeper(KeeperMeta keeperMeta, KeeperConfig keeperConfig,
 			LeaderElectorManager leaderElectorManager) throws Exception {
 
 		logger.info(remarkableMessage("[startKeeper]{}, {}"), keeperMeta);
 		File baseDir = new File(getTestFileDir() + "/replication_store_" + keeperMeta.getPort());
 
-		RedisKeeperServer redisKeeperServer = createRedisKeeperServer(keeperMeta, baseDir, keeperConfig, metaService, leaderElectorManager, new NoneKeepersMonitorManager());
+		RedisKeeperServer redisKeeperServer = createRedisKeeperServer(keeperMeta, baseDir, keeperConfig, leaderElectorManager, new NoneKeepersMonitorManager());
 		add(redisKeeperServer);
 		return redisKeeperServer;
 	}
 
-	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeperMeta, File baseDir, KeeperConfig keeperConfig,
-			MetaServerKeeperService metaService, LeaderElectorManager leaderElectorManager, KeepersMonitorManager keeperMonitorManager) {
+	protected void stopKeeper(RedisKeeperServer redisKeeperServer) throws Exception {
+		redisKeeperServer.stop();
+		redisKeeperServer.dispose();
+		remove(redisKeeperServer);
+	}
 
-		return new DefaultRedisKeeperServer(keeperMeta, keeperConfig, baseDir, metaService,
-				leaderElectorManager, keeperMonitorManager, proxyResourceManager);
+	protected RedisKeeperServer createGtidRedisKeeperServer(KeeperMeta keeperMeta, File baseDir, KeeperConfig keeperConfig,
+																LeaderElectorManager leaderElectorManager,
+																KeepersMonitorManager keeperMonitorManager,
+																RedisOpParser redisOpParser) {
+
+		Long replId = keeperMeta.parent().getDbId();
+		return new DefaultRedisKeeperServer(replId, keeperMeta, keeperConfig, baseDir,
+				leaderElectorManager, keeperMonitorManager, resourceManager, redisOpParser);
+	}
+
+	protected RedisKeeperServer createRedisKeeperServer(KeeperMeta keeperMeta, File baseDir, KeeperConfig keeperConfig,
+			 LeaderElectorManager leaderElectorManager, KeepersMonitorManager keeperMonitorManager) {
+
+		Long replId = keeperMeta.parent().getDbId();
+		return new DefaultRedisKeeperServer(replId, keeperMeta, keeperConfig, baseDir,
+				leaderElectorManager, keeperMonitorManager, resourceManager);
 	}
 
 	protected LeaderElectorManager createLeaderElectorManager(DcMeta dcMeta) throws Exception {
 
-		DefaultZkClient zkClient = new DefaultZkClient();
+		ZkConfig zkConfig = new DefaultZkConfig(dcMeta.getZkServer().getAddress());
+		DefaultZkClient zkClient = new DefaultZkClient(zkConfig);
 		zkClient.setZkAddress(dcMeta.getZkServer().getAddress());
 		zkClient.initialize();
 		zkClient.start();
@@ -160,23 +212,6 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 		leaderElectorManager.start();
 		add(leaderElectorManager);
 		return leaderElectorManager;
-	}
-
-	protected MetaServerKeeperService createMetaService(final List<MetaServerMeta> metaServerMetas) {
-
-		DefaultMetaServerLocator metaServerLocator = new DefaultMetaServerLocator(new MetaServerAddressAware() {
-
-			@Override
-			public String getMetaServerUrl() {
-				return String.format("http://%s:%d", "localhost", metaServerMetas.get(0).getPort());
-			}
-		});
-
-		DefaultMetaService metaService = new DefaultMetaService();
-		metaService.setConfig(new DefaultKeeperConfig());
-		metaService.setMetaServerLocator(metaServerLocator);
-
-		return metaService;
 	}
 
 	protected void startRedis(RedisMeta redisMeta, RedisMeta redisMaster) throws IOException {
@@ -284,6 +319,18 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 		return shardId;
 	}
 
+	public Long getClusterDbId() {
+		return clusterDbId;
+	}
+
+	public Long getShardDbId() {
+		return shardDbId;
+	}
+
+	public Long getReplId() {
+		return replId;
+	}
+
 	protected void sendMesssageToMasterAndTest(RedisMeta redisMaster, List<RedisMeta> slaves){
 		sendMesssageToMasterAndTest(defaultTestMessageCount, redisMaster, slaves);
 	}
@@ -339,7 +386,7 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 		Map<String, RedisKeeperServer> redisKeeperServers = getRegistry().getComponents(RedisKeeperServer.class);
 
 		for (RedisKeeperServer server : redisKeeperServers.values()) {
-			String currentDc = server.getCurrentKeeperMeta().parent().parent().parent().getId();
+			String currentDc = ((ClusterMeta) server.getCurrentKeeperMeta().parent().parent()).parent().getId();
 			if (dc.equals(currentDc) && server.getRedisKeeperServerState().keeperState().isActive()) {
 				return server;
 			}
@@ -416,6 +463,47 @@ public abstract class AbstractIntegratedTest extends AbstractRedisTest {
 
 	protected String getRedisTemplate() {
 		return "conf/redis_raw.conf";
+	}
+
+	protected String getCasePath(String caseName) {
+		String path = "cases/" + caseName;
+		URL url = getClass().getResource(path);
+		if (url == null) {
+		    url = getClass().getClassLoader().getResource(path);
+		}
+		if (url == null) {
+		    return null;
+		} else {
+			return url.getPath();
+		}
+	}
+
+	protected void prepareCaseIfExist() throws IOException {
+		String casePath = getCasePath(getClass().getSimpleName() + "-" + getTestName());
+		if (casePath != null) {
+			executeCommands("cp", "-rf", casePath + "/.", getTestFileDir());
+		}
+	}
+
+	protected void waitSlaveOnline(String redisIp, int redisPort) throws Exception {
+		waitConditionUntilTimeOut(() -> {
+			try {
+				return infoRedis(redisIp, redisPort, InfoCommand.INFO_TYPE.REPLICATION, "master_link_status")
+						.equalsIgnoreCase("up");
+			} catch (Exception e) {
+				return false;
+			}
+		}, 5000, 1000);
+	}
+
+	protected String infoRedis(String redisIp, int redisPort, InfoCommand.INFO_TYPE infoType, String key) throws Exception {
+		SimpleObjectPool<NettyClient> keyPool = getXpipeNettyClientKeyedObjectPool().getKeyPool(new DefaultEndPoint(redisIp, redisPort));
+		InfoCommand cmd = new InfoCommand(keyPool, infoType, scheduled);
+		cmd.logRequest(false);
+		cmd.logResponse(false);
+		String info = cmd.execute().get();
+		InfoResultExtractor extractor = new InfoResultExtractor(info);
+		return extractor.extract(key);
 	}
 
 

@@ -10,10 +10,14 @@ import com.ctrip.xpipe.concurrent.DefaultExecutorFactory;
 import com.ctrip.xpipe.concurrent.OneThreadTaskExecutor;
 import com.ctrip.xpipe.lifecycle.AbstractLifecycle;
 import com.ctrip.xpipe.redis.core.console.ConsoleService;
+import com.ctrip.xpipe.redis.core.entity.ApplierMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.meta.server.MetaServerStateChangeHandler;
+import com.ctrip.xpipe.redis.meta.server.config.MetaServerConfig;
+import com.ctrip.xpipe.redis.meta.server.meta.DcMetaCache;
 import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.OsUtils;
+import com.ctrip.xpipe.utils.VisibleForTesting;
 import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -33,6 +37,12 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 	
 	@Autowired
 	private ConsoleService consoleService;
+
+	@Autowired
+	private DcMetaCache dcMetaCache;
+
+	@Autowired
+	private MetaServerConfig config;
 
 	private ExecutorService executors;
 
@@ -55,7 +65,7 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 		super.doInitialize();
 		scheduled = Executors.newScheduledThreadPool(OsUtils.getMultiCpuOrMax(1, maxScheduled), XpipeThreadFactory.create("ConsoleNotifycationTaskScheduled"));
 		executors = DefaultExecutorFactory.createAllowCoreTimeout("ConsoleNotifycationTask", OsUtils.defaultMaxCoreThreadCount()).createExecutorService();
-		oneThreadTaskExecutor = new OneThreadTaskExecutor(getRetryFactory(), executors);
+		oneThreadTaskExecutor = new OneThreadTaskExecutor(getRetryFactory(), executors, config.getConsoleNotifycationTaskQueueSize());
 	}
 	
 	@Override
@@ -67,8 +77,8 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 	}
 	
 	@Override
-	public void keeperActiveElected(final String clusterId, final String shardId, final KeeperMeta activeKeeper) {
-		logger.info("[keeperActiveElected][called]{},{},{}",clusterId,shardId,activeKeeper);
+	public void keeperActiveElected(final Long clusterDbId, final Long shardDbId, final KeeperMeta activeKeeper) {
+		logger.info("[keeperActiveElected][called]cluster_{},shard_{},{}",clusterDbId,shardDbId,activeKeeper);
 		Command<Void> command = new AbstractCommand<Void>() {
 
 			@Override
@@ -78,8 +88,10 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 
 			@Override
 			protected void doExecute() throws Exception {
-				logger.info("[keeperActiveElected][execute]{},{},{}",clusterId,shardId,activeKeeper);
-				consoleService.keeperActiveChanged(dc, clusterId, shardId, activeKeeper);
+				Pair<String, String> clusterShard = dcMetaCache.clusterShardDbId2Name(clusterDbId, shardDbId);
+				logger.info("[keeperActiveElected][execute]cluster_{}:{},shard_{}:{},{}",clusterDbId, clusterShard.getKey(),
+						shardDbId, clusterShard.getValue(), activeKeeper);
+				consoleService.keeperActiveChanged(dc, clusterShard.getKey(), clusterShard.getValue(), activeKeeper);
 				future().setSuccess();
 			}
 
@@ -87,6 +99,31 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 			protected void doReset() {
 				
 			}
+		};
+		oneThreadTaskExecutor.executeCommand(command);
+	}
+
+	@Override
+	public void applierActiveElected(final Long clusterDbId, final Long shardDbId, final ApplierMeta activeApplier, String srcSids) {
+		logger.info("[applierActiveElected][called]cluster_{},shard_{},{}", clusterDbId, shardDbId, activeApplier);
+		Command<Void> command = new AbstractCommand<Void>() {
+
+			@Override
+			public String getName() {
+			    return "[applierActiveElected notify]";
+			}
+
+			@Override
+			protected void doExecute() throws Throwable {
+				Pair<String, String> clusterShard = dcMetaCache.clusterShardDbId2Name(clusterDbId, shardDbId);
+				logger.info("[applierActiveElected][execute]cluster_{}:{},shard_{}:{},{}", clusterDbId, clusterShard.getKey(),
+						shardDbId, clusterShard.getValue(), activeApplier);
+				consoleService.applierActiveChanged(dc, clusterShard.getKey(), clusterShard.getValue(), activeApplier);
+				future().setSuccess();
+			}
+
+			@Override
+			protected void doReset() {}
 		};
 		oneThreadTaskExecutor.executeCommand(command);
 	}
@@ -101,8 +138,9 @@ public class ConsoleNotifycationTask extends AbstractLifecycle implements MetaSe
 		this.consoleService = consoleService;
 	}
 
-	@Override
-	public void keeperMasterChanged(String clusterId, String shardId, Pair<String, Integer> newMaster) {
-		//nothing to do
+	@VisibleForTesting
+	protected void setDcMetaCache(DcMetaCache dcMetaCache) {
+		this.dcMetaCache = dcMetaCache;
 	}
+
 }

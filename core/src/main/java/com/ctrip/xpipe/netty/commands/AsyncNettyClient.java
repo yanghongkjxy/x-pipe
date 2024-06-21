@@ -28,11 +28,15 @@ public class AsyncNettyClient extends DefaultNettyClient {
         future.addListener(new ChannelFutureListener() {
             @Override
             public void operationComplete(ChannelFuture future) {
-                logger.info("[async][connected] endpint: {}, channel: {}", endpoint, ChannelUtil.getDesc(future.channel()));
-                if(endpoint instanceof ProxyEnabled) {
-                    desc.set(String.format("%s, %s:%d", ChannelUtil.getDesc(future.channel()), endpoint.getHost(), endpoint.getPort()));
+                if (future.isSuccess()) {
+                    logger.info("[async][connected] endpint: {}, channel: {}", endpoint, ChannelUtil.getDesc(future.channel()));
+                    if(endpoint instanceof ProxyEnabled) {
+                        desc.set(String.format("%s, %s:%d", ChannelUtil.getDesc(future.channel()), endpoint.getHost(), endpoint.getPort()));
+                    } else {
+                        desc.set(ChannelUtil.getDesc(future.channel()));
+                    }
                 } else {
-                    desc.set(ChannelUtil.getDesc(future.channel()));
+                    logger.info("[async][connect-fail] endpint: {}", endpoint, future.cause());
                 }
             }
         });
@@ -53,7 +57,7 @@ public class AsyncNettyClient extends DefaultNettyClient {
             future.addListener(new ChannelFutureListener() {
                 @Override
                 public void operationComplete(ChannelFuture future) throws Exception {
-                    if(!future.isSuccess()) {
+                    if(future.isSuccess()) {
                         logger.info("[async][send][{}]", desc);
                         AsyncNettyClient.super.sendRequest(byteBuf);
                     } else {
@@ -77,6 +81,7 @@ public class AsyncNettyClient extends DefaultNettyClient {
                         AsyncNettyClient.super.sendRequest(byteBuf, byteBufReceiver);
                     } else {
                         logger.warn("[async][wont-send][{}] {}", desc, byteBufReceiver.getClass().getSimpleName());
+                        byteBufReceiver.clientClosed(AsyncNettyClient.this);
                     }
                 }
             });

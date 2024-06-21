@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.net.URL;
+import java.util.function.Consumer;
 
 /**
  * @author wenchao.meng
@@ -118,6 +119,30 @@ public class FileUtils {
 		try(InputStream ins = getFileInputStream(fileName)){ 
 			String fileContent = IOUtil.toString(ins);
 			return fileContent;
+		}
+	}
+
+	public static void writeStringToFile(String filename, String content) throws IOException {
+
+		try(BufferedWriter writer = new BufferedWriter(new FileWriter(filename))){
+			writer.write(content);
+		}
+	}
+
+	public static void readFileAsStringLineByLine(File file, Consumer<String> consumer) {
+		try(FileInputStream fileInputStream = new FileInputStream(file)) {
+			try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(fileInputStream))) {
+				String str;
+				while (null != (str = bufferedReader.readLine())) {
+					consumer.accept(str);
+				}
+			}
+		} catch (FileNotFoundException fileNotFoundExc) {
+			logger.info("[readFileAsStringLineByLine][{}] file not found", file);
+		} catch (IOException ioExc) {
+			logger.info("[readFileAsStringLineByLine][{}] io err", file, ioExc);
+		} catch (Throwable th) {
+			logger.info("[readFileAsStringLineByLine][{}] fail", file, th);
 		}
 	}
 

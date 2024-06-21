@@ -1,15 +1,19 @@
 package com.ctrip.xpipe.utils;
 
 import com.ctrip.xpipe.api.config.Config;
+import com.ctrip.xpipe.api.config.ConfigProvider;
 import com.ctrip.xpipe.api.email.EmailService;
 import com.ctrip.xpipe.api.foundation.FoundationService;
 import com.ctrip.xpipe.api.lifecycle.Ordered;
 import com.ctrip.xpipe.api.migration.DcMapper;
 import com.ctrip.xpipe.api.migration.OuterClientService;
+import com.ctrip.xpipe.api.migration.auto.MonitorServiceFactory;
 import com.ctrip.xpipe.api.organization.Organization;
 import com.ctrip.xpipe.api.sso.LogoutHandler;
 import com.ctrip.xpipe.api.sso.UserInfo;
 import com.ctrip.xpipe.api.sso.UserInfoHolder;
+import com.ctrip.xpipe.client.redis.AsyncRedisClient;
+import com.ctrip.xpipe.client.redis.AsyncRedisClientFactory;
 import com.ctrip.xpipe.lifecycle.OrderedComparator;
 import com.ctrip.xpipe.metric.MetricProxy;
 import org.slf4j.Logger;
@@ -28,6 +32,10 @@ public class ServicesUtil {
 	private static Logger logger = LoggerFactory.getLogger(ServicesUtil.class);
 	
 	private static Map<Class<?>, Object> allServices = new ConcurrentHashMap<>();
+
+	public static ConfigProvider getConfigProviderService() {
+		return load(ConfigProvider.class);
+	}
 	
 	public static Config getConfigService(){
 		return load(Config.class);
@@ -67,6 +75,14 @@ public class ServicesUtil {
 
 	public static EmailService getEmailService() {
 		return load(EmailService.class);
+	}
+
+	public static AsyncRedisClientFactory getAsyncRedisClientFactory() {
+	    return load(AsyncRedisClientFactory.class);
+	}
+
+	public static MonitorServiceFactory getMonitorServiceFactory() {
+		return load(MonitorServiceFactory.class);
 	}
 
 	@SuppressWarnings("unchecked")

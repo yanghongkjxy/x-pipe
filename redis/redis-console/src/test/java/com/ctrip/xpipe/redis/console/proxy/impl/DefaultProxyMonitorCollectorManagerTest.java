@@ -10,11 +10,9 @@ import com.ctrip.xpipe.redis.core.entity.Route;
 import com.ctrip.xpipe.utils.StringUtil;
 import com.google.common.collect.Lists;
 import org.junit.*;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.List;
 
-import static org.junit.Assert.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -58,6 +56,19 @@ public class DefaultProxyMonitorCollectorManagerTest extends AbstractRedisTest {
                 newProxyModel("PROXYTCP://127.0.0.3:443")));
         when(routeService.getActiveRoutes()).thenReturn(Lists.newArrayList());
         manager.update();
+        Assert.assertTrue(manager.getProxyMonitorResults().isEmpty());
+    }
+
+    @Test
+    public void testNotLeaderFreeAllMonitor() {
+        manager.isleader();
+        ProxyMonitorCollector collector = manager.getOrCreate(
+                new ProxyModel().setActive(true).setDcName("dc").setId(1L).setUri("PROXYTCP://10.26.188.174:80"));
+        Assert.assertNotNull(collector);
+        manager.getOrCreate(new ProxyModel().setActive(true).setDcName("dc").setId(1L).setUri("PROXYTCP://10.26.188.174:80"));
+        Assert.assertEquals(1, manager.getProxyMonitorResults().size());
+
+        manager.notLeader();
         Assert.assertTrue(manager.getProxyMonitorResults().isEmpty());
     }
 

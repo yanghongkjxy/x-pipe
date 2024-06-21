@@ -1,6 +1,7 @@
 package com.ctrip.xpipe.redis.console.migration.status;
 
 import com.ctrip.xpipe.redis.console.AbstractConsoleTest;
+import com.ctrip.xpipe.redis.console.cache.AzGroupCache;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationCluster;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationEvent;
 import com.ctrip.xpipe.redis.console.migration.model.MigrationShard;
@@ -10,6 +11,7 @@ import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.DcTbl;
 import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
 import com.ctrip.xpipe.redis.console.model.ShardTbl;
+import com.ctrip.xpipe.redis.console.repository.AzGroupClusterRepository;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
 import com.ctrip.xpipe.redis.console.service.RedisService;
@@ -21,7 +23,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.invocation.InvocationOnMock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.mockito.stubbing.Answer;
 
 import java.util.LinkedList;
@@ -52,18 +54,23 @@ public class MigrationStatTest extends AbstractConsoleTest {
 
     @Mock
     private MigrationShard mockedMigrationShard;
+    @Mock
+    private AzGroupClusterRepository azGroupClusterRepository;
+    @Mock
+    private AzGroupCache azGroupCache;
 
     @Before
     public void setUp() {
 
         prepareData();
-        migrationCluster = new DefaultMigrationCluster(executors, scheduled, migrationEvent, mockedMigrationCluster, mockedDcService, mockedClusterService,
+        migrationCluster = new DefaultMigrationCluster(executors, scheduled, migrationEvent, mockedMigrationCluster,
+            azGroupClusterRepository, azGroupCache, mockedDcService, mockedClusterService,
                 mockedShardService, mockedRedisService, mockedMigrationService);
         migrationCluster.addNewMigrationShard(mockedMigrationShard);
     }
 
     @Test
-    public void testInitiatedToChecking() {
+    public void testInitiatedToChecking() throws Exception {
         Assert.assertEquals(MigrationStatus.Initiated, migrationCluster.getStatus());
 
         migrationCluster.process();
@@ -74,9 +81,7 @@ public class MigrationStatTest extends AbstractConsoleTest {
     }
 
     @Test
-    public void testCheckingToMigrating() {
-    	when(mockedMigrationShard.getCurrentShard()).thenReturn((new ShardTbl()).setShardName("test-shard"));
-    	
+    public void testCheckingToMigrating() throws Exception {
         Assert.assertEquals(MigrationStatus.Initiated, migrationCluster.getStatus());
 
         migrationCluster.updateStat(new MigrationMigratingState(migrationCluster));
@@ -100,15 +105,6 @@ public class MigrationStatTest extends AbstractConsoleTest {
         dcs.add((new DcTbl()).setId(1).setDcName("ADC"));
         dcs.add((new DcTbl()).setId(2).setDcName("BDC"));
         when(mockedDcService.findClusterRelatedDc("test-cluster")).thenReturn(dcs);
-        when(mockedClusterService.find(anyString())).thenReturn(clusterTbl);
-        when(mockedClusterService.find(anyInt())).thenReturn(clusterTbl);
-        doAnswer(new Answer() {
-            @Override
-            public Object answer(InvocationOnMock invocation) throws Throwable {
-                clusterTbl.setStatus(((ClusterStatus) invocation.getArguments()[1]).toString());
-                return null;
-            }
-        }).when(mockedClusterService).updateStatusById(anyInt(), any());
     }
 
 }

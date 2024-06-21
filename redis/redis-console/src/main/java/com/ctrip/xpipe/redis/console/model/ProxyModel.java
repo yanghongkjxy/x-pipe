@@ -4,6 +4,7 @@ import com.ctrip.xpipe.api.endpoint.Endpoint;
 import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpoint;
 
+import java.io.Serializable;
 import java.util.Objects;
 
 /**
@@ -12,7 +13,7 @@ import java.util.Objects;
  * Jun 19, 2018
  */
 
-public class ProxyModel {
+public class ProxyModel implements Serializable {
 
     private String uri;
 
@@ -103,6 +104,18 @@ public class ProxyModel {
     @Override
     public int hashCode() {
         return Objects.hash(uri, dcName, id, active);
+    }
+
+    @Override
+    public ProxyModel clone() {
+        ProxyModel clone = new ProxyModel();
+        clone.uri = this.uri;
+        clone.dcName = this.dcName;
+        clone.id = this.id;
+        clone.active = this.active;
+        clone.monitorActive = this.monitorActive;
+        if (null != this.hostPort) clone.hostPort = new HostPort(this.hostPort.getHost(), this.hostPort.getPort());
+        return clone;
     }
 
     @Override

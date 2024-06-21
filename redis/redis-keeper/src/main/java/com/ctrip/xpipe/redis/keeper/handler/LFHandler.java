@@ -16,7 +16,7 @@ public class LFHandler extends AbstractCommandHandler{
 	}
 
 	@Override
-	protected void doHandle(String[] args, RedisClient redisClient) {
+	protected void doHandle(String[] args, RedisClient<?> redisClient) {
 		
 		if(redisClient instanceof RedisSlave){
 			
@@ -24,7 +24,7 @@ public class LFHandler extends AbstractCommandHandler{
 				logger.debug("[doHandle][\\n get]" + redisClient);
 			}
 			RedisSlave redisSlave = (RedisSlave) redisClient;
-			redisSlave.ack(null);
+			redisSlave.ack(null, false);
 		}
 	}
 

@@ -4,9 +4,13 @@
     <parent>
         <groupId>com.ctrip.framework.xpipe.redis</groupId>
         <artifactId>package</artifactId>
-        <version>1.1.0-SNAPSHOT</version>
+        <version>1.2.14</version>
     </parent>
     <artifactId>redis-proxy-package</artifactId>
+
+    <properties>
+        <netty4.version>4.1.52.Final</netty4.version>
+    </properties>
 
     <dependencies>
         <dependency>
@@ -46,7 +50,7 @@
                         </exclusion>
                         <exclusion>
                             <groupId>com.ctrip.infosec</groupId>
-                            <artifactId>sso-client-qconfig</artifactId>
+                            <artifactId>sso-client-new</artifactId>
                         </exclusion>
                         <exclusion>
                             <groupId>com.dianping.cat</groupId>
@@ -56,15 +60,9 @@
                             <groupId>com.ctrip.framework.xpipe</groupId>
                             <artifactId>core</artifactId>
                         </exclusion>
-                    </exclusions>
-                </dependency>
-                <dependency>
-                    <groupId>org.springframework.boot</groupId>
-                    <artifactId>spring-boot-starter-actuator</artifactId>
-                    <exclusions>
                         <exclusion>
-                            <groupId>org.springframework.boot</groupId>
-                            <artifactId>spring-boot-starter-logging</artifactId>
+                            <groupId>com.ctrip.soa.platform.basesystem.emailservice.v1</groupId>
+                            <artifactId>emailservice</artifactId>
                         </exclusion>
                     </exclusions>
                 </dependency>
@@ -89,6 +87,24 @@
                 <configuration>
                     <mainClass>com.ctrip.xpipe.redis.proxy.ProxyApplication</mainClass>
                     <executable>true</executable>
+                    <excludes>
+                        <exclude>
+                            <groupId>com.ctrip.framework.fireman</groupId>
+                            <artifactId>fireman</artifactId>
+                        </exclude>
+                        <exclude>
+                            <groupId>com.ctrip.framework</groupId>
+                            <artifactId>vi</artifactId>
+                        </exclude>
+                        <exclude>
+                            <groupId>com.ctrip.infosec</groupId>
+                            <artifactId>sso-client-new</artifactId>
+                        </exclude>
+                        <exclude>
+                            <groupId>com.ctrip.basebiz</groupId>
+                            <artifactId>accounts-mobile-request-filter</artifactId>
+                        </exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>

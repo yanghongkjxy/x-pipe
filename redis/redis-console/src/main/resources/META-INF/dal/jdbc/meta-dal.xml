@@ -24,6 +24,14 @@
 				<member name='dc-description'/>
 			</readset>
 		</readsets>
+
+		<updatesets>
+			<readset name="MAIN">
+				<member name="zone-id"/>
+				<member name='dc-name'/>
+				<member name='dc-description'/>
+			</readset>
+		</updatesets>
 		
 		<query-defs>
 			<query name="find-all-dcs" type="SELECT" multiple="true">
@@ -80,7 +88,6 @@
 					AND dct.deleted = 0
 					AND dcst.deleted = 0
 					AND rt.deleted = 0
-					AND ct.is_xpipe_interested = 1
 					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
@@ -106,6 +113,14 @@
 					]]>
 				</statement>
 			</query>
+			<query name='insert-with-part-field' type='INSERT' batch='false'>
+				<statement>
+					<![CDATA[
+					INSERT INTO <TABLE/>(<FIELDS/>)
+        			VALUES(<VALUES/>)
+        			]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -114,18 +129,35 @@
 		<var name="cluster-org-name" value-type="String"/>
 		<var name="cluster-names" value-type="java.util.List&lt;String&gt;" />
 		<var name="dc-id" value-type="long"/>
+		<var name="ids" value-type="java.util.List&lt;Long&gt;" />
+		<var name="origin-status" value-type="String"/>
+		<var name="group-type" value-type="String"/>
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt" multiple="true"/>
 		<relation name="dc-cluster-info" entity-name="dc-cluster-tbl" entity-alias="dct" multiple="true"/>
 		<relation name="shard-info" entity-name="shard-tbl" entity-alias="st2" multiple="true"/>
 		<relation name="organization-info" entity-name="organization-tbl" entity-alias="ot"/>
+		<relation name="migration-event" entity-name="migration-event-tbl" entity-alias="met"/>
+		<relation name="migration-clusters" entity-name="migration-cluster-tbl" entity-alias="mct"/>
+
+		<updatesets>
+			<updateset name="MIGRATION_STATUS" >
+				<member name="status" />
+				<member name="migration-event-id" />
+			</updateset>
+		</updatesets>
 
 		<readsets>
 			<readset name="COUNT">
 				<member name="count"/>
 			</readset>
 			<readset name="NAME">
+				<member name="id"/>
 				<member name='cluster-name'/>
+			</readset>
+			<readset name="CREATE_TIME">
+				<member name='cluster-name'/>
+				<member name="create-time"/>
 			</readset>
 			<readset name="FULL_WITH_SHARDS">
 				<readset-ref name="FULL"/>
@@ -135,16 +167,124 @@
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="organization-info"/>
 			</readset>
+			<readset name="NAME_AND_ORG">
+				<member name="id"/>
+				<member name='cluster-name'/>
+				<member name='cluster-org-id'/>
+			</readset>
 			<readset name="CLUSTER_META_INFO">
 				<member name="id"/>
 				<member name="cluster-name"/>
+				<member name="cluster-type"/>
 				<member name="status"/>
+				<member name="migration-event-id"/>
 				<member name="activedc-id"/>
 				<member name="cluster-org-id"/>
+				<member name="cluster-admin-emails"/>
+				<member name="cluster-designated-route-ids"/>
+			</readset>
+			<readset name="FULL_WITH_MIGRATION_EVENT">
+                <readset-ref name="FULL"/>
+                <readset-ref name="FULL" relation-name="migration-event"/>
+            </readset>
+			<readset name="FULL_WITH_MIGRATION_OVERVIEW">
+				<readset-ref name="FULL"/>
+				<readset-ref name="ID" relation-name="migration-event"/>
+				<readset-ref name="STATUS" relation-name="migration-clusters"/>
 			</readset>
 		</readsets>
 		
 		<query-defs>
+			<query name="count-by-active-dc" type="SELECT" multiple="false">
+				<param name='activedc-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='activedc-id'/> = ${activedc-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-by-active-dc-and-cluster-type" type="SELECT" multiple="false">
+				<param name='activedc-id'/>
+				<param name="cluster-type" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='activedc-id'/> = ${activedc-id}
+					AND <FIELD name='cluster-type' /> = ${cluster-type}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="atomic-set-status" type="UPDATE" batch='false'>
+				<param name="id" />
+				<param name="origin-status" />
+				<statement><![CDATA[
+					UPDATE <TABLE />
+					SET <FIELDS />
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='status' /> = ${origin-status}
+					AND <FIELD name='deleted'/> = 0
+				]]></statement>
+			</query>
+			<query name="find-clusters-with-org-info-by-id" type="SELECT" multiple="true">
+				<param name="ids" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join  <TABLE name='organization-info'/> on <FIELD name='cluster-org-id'/> = ot.id
+					WHERE <FIELD name='id'/> IN <IN>${ids}</IN>
+					]]>
+				</statement>
+			</query>
+			<query name="find-clusters-with-org-info-by-cluster-type" type="SELECT" multiple="true">
+				<param name="cluster-type" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join  <TABLE name='organization-info'/> on <FIELD name='cluster-org-id'/> = ot.id
+					WHERE <FIELD name='cluster-type' /> = ${cluster-type}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-migrating-clusters" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='status'/> != 'Normal'
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-migrating-clusters-with-events" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join <TABLE name='migration-event'/> on <FIELD name='migration-event-id'/> = met.id
+					WHERE <FIELD name='status'/> != 'Normal'
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-migrating-clusters-overview" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join <TABLE name='migration-event'/> on <FIELD name='migration-event-id'/> = met.id
+					left join <TABLE name='migration-clusters'/> on met.id = mct.migration_event_id
+					WHERE <FIELD name='id'/>  = mct.cluster_id
+					AND <FIELD name='status'/> != 'Normal'
+					AND <FIELD name='deleted'/> = 0
+					AND met.deleted = 0
+					AND mct.deleted = 0
+					]]>
+				</statement>
+			</query>
 			<query name="total-count" type="SELECT" multiple="false">
 				<statement>
 				<![CDATA[
@@ -218,6 +358,21 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-clusters-by-group-type" type="SELECT" multiple="true">
+				<param name="group-type"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE
+					id in (
+							SELECT cluster_id FROM <TABLE name='dc-cluster-info' />
+							WHERE dct.group_type = ${group-type} AND dct.deleted = 0
+						)
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name="find-cluster-and-org-by-cluster-name" type="SELECT" multiple="false">
 				<param name='cluster-name'/>
 				<statement>
@@ -251,11 +406,21 @@
 					]]>
 				</statement>
 			</query>
+			<query name='update-cluster-designated-route-ids' type='UPDATE' batch='false'>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+					SET <FIELD name='cluster-designated-route-ids'/> = ${cluster-designated-route-ids}
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='update-status-by-id' type='UPDATE' batch='false'>
 				<statement>
 					<![CDATA[
 					UPDATE <TABLE/>
-					SET <FIELD name='status'/> = ${status}
+					SET <FIELDS />
 					WHERE <FIELD name='id'/> = ${id}
 					AND <FIELD name='deleted'/> = 0
 					]]>
@@ -276,6 +441,20 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-all-by-dc-id" type="SELECT" multiple="true">
+				<param name='dc-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-info' />
+					WHERE <FIELD name='id' /> = dct.cluster_id
+					AND dct.dc_id = ${dc-id}
+					AND <FIELD name='deleted' /> = 0
+					AND dct.deleted = 0
+					group by <FIELD name='id' />
+					]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -283,15 +462,27 @@
 		<var name="dc-name" value-type="String"/>
 		<var name="cluster-name" value-type="String"/>
 		<var name="cluster-ids" value-type="java.util.List&lt;Long&gt;" />
-		
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
 
 		<readsets>
+			<readset name="CLUSTER_ID">
+				<member name="cluster-id" />
+			</readset>
+			<readset name="AZ_GROUP_CLUSTER_ID">
+				<member name="az-group-cluster-id"/>
+			</readset>
 			<readset name="FULL_WITH_DC">
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="dc-info"/>
+			</readset>
+            <readset name="ID_AND_DC_ID">
+				<member name="dc-cluster-id"/>
+				<member name="dc-id"/>
+			</readset>
+			<readset name="DC_CLUSTER_ACTIVE_REDIS_CHECK_RULES">
+				<member name="active-redis-check-rules"/>
 			</readset>
 		</readsets>
 
@@ -350,6 +541,19 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-all-by-cluster-and-group-type" type="SELECT" multiple="true">
+				<param name="cluster-id"/>
+				<param name="group-type"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='cluster-id' /> = ${cluster-id}
+					AND <FIELD name='group-type'/> = ${group-type}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name="find-all" type="SELECT" multiple="true">
 				<statement>
 					<![CDATA[
@@ -386,8 +590,12 @@
 
 	<entity name="shard-tbl" table="SHARD_TBL" alias="st2">
 		<var name="cluster-name" value-type="String"/>
+		<var name="shard-names" value-type="java.util.List&lt;String&gt;"/>
+		<var name="dc-id" value-type="Long"/>
 
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
+		<relation name="dc-cluster-info" entity-name="dc-cluster-tbl" entity-alias="dct"/>
+		<relation name="dc-cluster-shard-info" entity-name="dc-cluster-shard-tbl" entity-alias="dcst"/>
 
 		<readsets>
 			<readset name="NAME">
@@ -397,6 +605,7 @@
 				<member name="setinel-monitor-name"/>
 			</readset>
 			<readset name="NAME_AND_MONITOR_NAME">
+				<member name="id"/>
 				<member name="shard-name"/>
 				<member name="setinel-monitor-name"/>
 			</readset>
@@ -442,6 +651,39 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-by-shard-names" type="SELECT" multiple="true">
+				<param name="cluster-name"/>
+				<param name="shard-names"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>
+					WHERE <FIELD name='shard-name'/> IN <IN>${shard-names}</IN>
+					AND <FIELD name='cluster-id'/> = ct.id
+					AND ct.cluster_name = ${cluster-name}
+					AND ct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-shard-by-dc-cluster" type="SELECT" multiple="true">
+				<param name="dc-id"/>
+				<param name="cluster-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='dc-cluster-info'/>, <TABLE name='dc-cluster-shard-info'/>
+					WHERE dct.dc_id = ${dc-id}
+					AND dct.cluster_id = ${cluster-id}
+					AND <FIELD name='cluster-id'/> = ${cluster-id}
+					AND dct.dc_cluster_id = dcst.dc_cluster_id
+					AND <FIELD name='id'/> = dcst.shard_id
+					AND dcst.deleted = 0
+					AND dct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='delete-shards-batch' type='UPDATE' batch='true'>
 				<param name='id'/>
 				<param name='shard-name'/>
@@ -479,10 +721,17 @@
 	</entity>
 
 	<entity name="dc-cluster-shard-tbl" table="DC_CLUSTER_SHARD_TBL" alias="dcst">
+		<member name="cluster-count" value-type="long" select-expr="COUNT(distinct dcst.dc_cluster_id) `cluster-count`" all="false"/>
+		<member name="shard-count" value-type="long" select-expr="COUNT(distinct dcst.shard_id) `shard-count`" all="false"/>
+
 		<var name="dc-id" value-type="Long"/>
 		<var name="dc-name" value-type="String"/>
+		<var name="cluster-id" value-type="Long"/>
 		<var name="cluster-name" value-type="String"/>
 		<var name="shard-name" value-type="String"/>
+		<var name="cluster-types" value-type="java.util.Set&lt;String&gt;" />
+		<var name="redis-ip" value-type="String"/>
+		<var name="redis-port" value-type="Integer"/>
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
@@ -491,18 +740,59 @@
 		<relation name="redis-info" entity-name="redis-tbl" entity-alias="rt"/>
 
 		<readsets>
+			<readset name="DC_CLUSTER_ID">
+				<member name="dc-cluster-id"/>
+			</readset>
+			<readset name="SHARD_ID">
+				<member name="shard-id"/>
+			</readset>
 			<readset name="SENTINEL_ID">
 				<member name="setinel-id"/>
 			</readset>
-			<readset name="DC_CLUSTER_SHARD_META_INFO">
+			<readset name="CLUSTER_COUNT_AND_SHARD_COUNT">
+				<member name="cluster-count" />
+				<member name="shard-count" />
+			</readset>
+			<readset name="DC_CLUSTER_SHARD_WITH_AZ_GROUP">
+				<readset-ref name="DC_CLUSTER_ID"/>
+				<readset-ref name="SHARD_ID"/>
+				<readset-ref name="AZ_GROUP_CLUSTER_ID" relation-name="dc-cluster-info"/>
+			</readset>
+			<readset name="CLUSTER_SHARD_REDIS_META_INFO">
 				<readset-ref name="SENTINEL_ID"/>
 				<readset-ref name="CLUSTER_META_INFO" relation-name="cluster-info"/>
 				<readset-ref name="REDIS_META_INFO" relation-name="redis-info"/>
 				<readset-ref name="NAME_AND_MONITOR_NAME" relation-name="shard-info"/>
 			</readset>
+			<readset name="FULL_WITH_SHARD_REDIS">
+				<readset-ref name="FULL"/>
+				<readset-ref name="FULL" relation-name="shard-info"/>
+				<readset-ref name="REDIS_META_INFO" relation-name="redis-info"/>
+<!--				<readset-ref name="APPLIER_META_INFO" relation-name="applier-info"/>-->
+			</readset>
+			<readset name="DC_CLUSTER_SHARD_REDIS_META_INFO">
+				<readset-ref name="SENTINEL_ID"/>
+				<readset-ref name="CLUSTER_META_INFO" relation-name="cluster-info"/>
+				<readset-ref name="REDIS_META_INFO" relation-name="redis-info"/>
+				<readset-ref name="NAME_AND_MONITOR_NAME" relation-name="shard-info"/>
+                <readset-ref name="ID_AND_DC_ID" relation-name="dc-cluster-info"/>
+			</readset>
+			<readset name="FULL_WITH_DC_INFO">
+				<readset-ref name="FULL"/>
+				<readset-ref name="FULL" relation-name="dc-cluster-info"/>
+			</readset>
 		</readsets>
 
 		<query-defs>
+			<query name='find-all' type='SELECT' multiple='true'>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='find-dc-cluster-shard' type='SELECT' multiple='false'>
 				<param name='shard-id'/>
 				<param name='dc-cluster-id'/>
@@ -516,7 +806,7 @@
 					]]>
 				</statement>
 			</query>
-			<query name="find-dc-cluser-shard-by-name" type="SELECT" multiple="false">
+			<query name="find-dc-cluster-shard-by-name" type="SELECT" multiple="false">
 				<param name="dc-name"/>
 				<param name="cluster-name"/>
 				<param name="shard-name"/>
@@ -533,6 +823,55 @@
 					AND dt.dc_name = ${dc-name}
 					AND ct.cluster_name = ${cluster-name}
 					AND dt.deleted = 0
+					AND ct.deleted = 0
+					AND st2.deleted = 0
+					AND dct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-cluster-id-for-dr-switch" type="SELECT" multiple="true">
+				<param name="cluster-id"/>
+				<statement>
+					<![CDATA[
+					SELECT DISTINCT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='dc-cluster-info'/>
+					WHERE <FIELD name='dc-cluster-id'/> = dct.dc_cluster_id
+					AND <FIELD name='shard-id'/> != 0
+					AND <FIELD name='deleted'/> = 0
+					AND (dct.group_type = 'DR_MASTER' or dct.group_type is null)
+					AND dct.cluster_id = ${cluster-id}
+					AND dct.deleted = 0;
+					]]>
+				</statement>
+			</query>
+			<query name="find-dc-cluster-shard-with-az-group-by-cluster-id" type="SELECT" multiple="true">
+				<param name="cluster-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='dc-cluster-info'/>
+					WHERE <FIELD name='dc-cluster-id'/> = dct.dc_cluster_id
+					AND <FIELD name='shard-id'/> != 0
+					AND <FIELD name='deleted'/> = 0
+					AND dct.cluster_id = ${cluster-id}
+					AND dct.deleted = 0;
+					]]>
+				</statement>
+			</query>
+			<query name="find-cluster-shard-by-name" type="SELECT" multiple="true">
+				<param name="cluster-name"/>
+				<param name="shard-name"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>,
+						<TABLE name='shard-info'/>, <TABLE name='dc-cluster-info'/>
+					WHERE <FIELD name='shard-id'/> = st2.id
+					AND <FIELD name='dc-cluster-id'/> = dct.dc_cluster_id
+					AND st2.shard_name = ${shard-name}
+					AND dct.cluster_id = ct.id
+					AND ct.cluster_name = ${cluster-name}
 					AND ct.deleted = 0
 					AND st2.deleted = 0
 					AND dct.deleted = 0
@@ -600,6 +939,46 @@
 					]]>
 				</statement>
 			</query>
+			<query name='find-all-by-dc-id-and-in-cluster-types' type='SELECT' multiple='true'>
+				<param name="dc-id"/>
+				<param name="cluster-types"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>, <TABLE name='dc-cluster-info'/>, <TABLE name='redis-info'/>, <TABLE name='shard-info'/>
+					WHERE dct.dc_id = ${dc-id}
+					AND ct.cluster_type in <IN>${cluster-types}</IN>
+					AND dct.cluster_id = ct.id
+					AND <FIELD name='dc-cluster-id'/> = dct.dc_cluster_id
+					AND <FIELD name='shard-id' /> = st2.id
+					AND <FIELD name='dc-cluster-shard-id'/> = rt.dc_cluster_shard_id
+					AND st2.deleted = 0
+					AND rt.deleted = 0
+					AND ct.deleted = 0
+					AND dct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='find-all-by-cluster-types' type='SELECT' multiple='true'>
+				<param name="cluster-types"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>, <TABLE name='dc-cluster-info'/>, <TABLE name='redis-info'/>, <TABLE name='shard-info'/>
+					WHERE ct.cluster_type in <IN>${cluster-types}</IN>
+					AND dct.cluster_id = ct.id
+					AND <FIELD name='dc-cluster-id'/> = dct.dc_cluster_id
+					AND <FIELD name='shard-id' /> = st2.id
+					AND <FIELD name='dc-cluster-shard-id'/> = rt.dc_cluster_shard_id
+					AND st2.deleted = 0
+					AND rt.deleted = 0
+					AND ct.deleted = 0
+					AND dct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='insert-batch' type='INSERT' batch='true'>
 				<statement>
 					<![CDATA[
@@ -619,6 +998,40 @@
         			]]>
 				</statement>
 			</query>
+			<query name="find-all-shards-by-sentinel" type="SELECT" multiple="true">
+				<param name='setinel-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/> FROM <TABLE/>
+					WHERE <FIELD name='setinel-id'/>=${setinel-id} AND <FIELD name='deleted'/>=0;
+					]]>
+				</statement>
+			</query>
+			<query name="find-with-shard-redis-by-sentinel" type="SELECT" multiple="true">
+				<param name='setinel-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/> FROM <TABLE/>, <TABLE name='shard-info'/>, <TABLE name='redis-info'/>
+					WHERE <FIELD name='shard-id' /> = st2.id
+					AND <FIELD name='dc-cluster-shard-id' />=rt.dc_cluster_shard_id
+					AND rt.deleted=0
+					AND rt.master=1
+					AND <FIELD name='setinel-id'/>=${setinel-id} AND <FIELD name='deleted'/>=0;
+					]]>
+				</statement>
+			</query>
+			<query name="find-backup-dc-shards-by-sentinel" type="SELECT" multiple="true">
+				<param name='setinel-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='dc-cluster-info'/>, <TABLE name='cluster-info'/>
+					WHERE <FIELD name='setinel-id'/>=${setinel-id} AND <FIELD name='deleted' />=0
+					AND <FIELD name='dc-cluster-id'/>=dct.dc_cluster_id AND dct.cluster_id=ct.id
+					AND ct.activedc_id!=0 and ct.activedc_id!=dct.dc_id;
+					]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -626,10 +1039,13 @@
 		<!-- Add two constant below to fix bug, that when use h2 db in unit/integration test -->
 		<!-- RedisService.updateRedis() will fail, due to h2 db not recognize sequential insert with id of 0 -->
 		<member name="id" field="id" value-type="Long" length="20" nullable="true" key="true" auto-increment="true" />
+		<member name="count" value-type="long" select-expr="COUNT(rt.id) count" all="false"/>
 		<var name="key-id" value-type="Long" key-member="id" />
 
 		<var name="dc-name" value-type="String"/>
 		<var name="cluster-name" value-type="String"/>
+		<var name="keeper-container-id" value-type="long" />
+		<var name="dc-id" value-type="Long"/>
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
@@ -651,9 +1067,51 @@
 				<member name="redis-master"/>
 				<member name="keepercontainer-id"/>
 			</readset>
+			<readset name="CONTAINER_ID">
+				<member name="keepercontainer-id" />
+			</readset>
+			<readset name="CONTAINER_KEEPER_COUNT">
+				<member name="count" />
+			</readset>
+			<readset name="CONTAINER_LOAD" >
+				<readset-ref name="CONTAINER_ID" />
+				<readset-ref name="CONTAINER_KEEPER_COUNT" />
+				<readset-ref name="CLUSTER_COUNT_AND_SHARD_COUNT" relation-name="dc-cluster-shard-info" />
+			</readset>
+			<readset name="CLUSTER_ID">
+				<readset-ref name="CLUSTER_ID" relation-name="dc-cluster-info" />
+			</readset>
 		</readsets>
 
 		<query-defs>
+			<query name='find-dc-cluster-by-keeper-container' type='SELECT' multiple='true'>
+				<param name="keeper-container-id" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-shard-info' />, <TABLE name='dc-cluster-info' />
+					WHERE <FIELD name='keepercontainer-id' /> = ${keeper-container-id}
+					AND <FIELD name='deleted' /> = 0
+					AND <FIELD name='dc-cluster-shard-id' /> = dcst.dc_cluster_shard_id
+					AND dcst.dc_cluster_id=dct.dc_cluster_id
+					AND dct.deleted = 0
+					AND dcst.deleted = 0
+        			]]>
+				</statement>
+			</query>
+			<query name='count-container-keeper-and-cluster-and-shard' type='SELECT' multiple='true'>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-shard-info' />
+					WHERE <FIELD name='dc-cluster-shard-id' /> = dcst.dc_cluster_shard_id
+					AND <FIELD name='redis-role' /> = 'keeper'
+					AND <FIELD name='deleted' /> = 0
+					AND dcst.deleted = 0
+					GROUP BY <FIELD name='keepercontainer-id' />
+        			]]>
+				</statement>
+			</query>
 
 			<query name="find-all-by-dc-cluster-name" type="SELECT" multiple="true">
 				<param name="dc-name"/>
@@ -679,6 +1137,43 @@
 				</statement>
 			</query>
 
+			<query name="find-all-by-dc-cluster" type="SELECT" multiple="true">
+				<param name="dc-id"/>
+				<param name="cluster-name"/>
+				<param name="redis-role"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='dc-info'/>, <TABLE name='cluster-info'/>, <TABLE name='dc-cluster-info'/>, <TABLE name='dc-cluster-shard-info'/>
+					WHERE dt.id = ${dc-id}
+					AND ct.cluster_name = ${cluster-name}
+					AND dct.dc_id = dt.id
+					AND dct.cluster_id = ct.id
+					AND dct.dc_cluster_id = dcst.dc_cluster_id
+					AND dcst.dc_cluster_shard_id = <FIELD name='dc-cluster-shard-id' />
+					AND <FIELD name='redis-role'/> = ${redis-role}
+					AND dt.deleted = 0
+					AND ct.deleted = 0
+					AND dct.deleted = 0
+					AND dcst.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+
+			<query name='find-by-ip-port' type='SELECT' multiple="false">
+				<param name='redis-ip'/>
+				<param name='redis-port'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='redis-ip' /> = ${redis-ip}
+				    AND <FIELD name='redis-port' /> = ${redis-port}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 			<query name='find-all-by-dc-cluster-shard-id' type='SELECT' multiple="true">
 				<param name='dc-cluster-shard-id'/>
 				<param name='redis-role'/>
@@ -764,7 +1259,7 @@
 				<statement>
 					<![CDATA[
 					UPDATE <TABLE/>
-        			SET <FIELD name='deleted'/> = 1, <FIELD name='run-id'/> = ${run-id}
+        			SET <FIELD name='deleted'/> = 1, <FIELD name='run-id'/> = ${run-id}, <FIELD name='deleted-at'/> = UNIX_TIMESTAMP()
        				WHERE <FIELD name='id'/> = ${id}
         			AND <FIELD name='deleted'/> = 0
         			]]>
@@ -871,17 +1366,28 @@
 		<relation name="dc-cluster-shard-info" entity-name="dc-cluster-shard-tbl" entity-alias="dcst"/>
 
 		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
+		<member name="shard-count" value-type="long" select-expr="COUNT(dcst.dc_cluster_shard_id) `shard-count`" all="false"/>
 
 		<readsets>
             <readset name="COUNT">
                 <member name="count"/>
             </readset>
+			<readset name="SHARD-COUNT">
+				<member name="shard-count"/>
+			</readset>
 			<readset name="SENTINEL-USAGE">
                 <readset-ref name="FULL"/>
-                <readset-ref name="COUNT"/>
+                <readset-ref name="SHARD-COUNT"/>
                 <readset-ref name="FULL" relation-name="dc-info"/>
 			</readset>
 		</readsets>
+
+		<updatesets>
+			<updateset name="ADDRESS">
+				<member name="setinel-id"/>
+				<member name="setinel-address"/>
+			</updateset>
+		</updatesets>
 
 		<query-defs>
 			<query name="find-by-dc-id" type="SELECT" multiple="true">
@@ -921,13 +1427,204 @@
 				<statement>
 					<![CDATA[
 					SELECT <FIELDS/>
-					FROM <TABLE/> left join <TABLE name='dc-cluster-shard-info'/>
-					on <FIELD name='setinel-id'/> = dcst.setinel_id, <TABLE name='dc-info'/>
+					FROM <TABLE/> LEFT JOIN <TABLE name='dc-cluster-shard-info'/>
+					ON <FIELD name='setinel-id'/> = dcst.setinel_id AND dcst.deleted=0
+					INNER JOIN <TABLE name='dc-info'/> on <FIELD name='dc-id'/> = dt.id
 					WHERE <FIELD name='deleted'/> = 0
-					AND dcst.deleted = 0
-					AND dt.id = <FIELD name='dc-id'/>
 					GROUP BY <FIELD name='setinel-id'/>
 					]]>
+				</statement>
+			</query>
+
+			<query name="update-sentinel-addr" type="UPDATE" batch="false">
+				<statement>
+					<![CDATA[
+						UPDATE <TABLE/>
+						SET <FIELD name='setinel-address'/> = ${setinel-address}
+						WHERE <FIELD name='setinel-id'/> = ${setinel-id}
+						]]>
+				</statement>
+			</query>
+
+			<query name="delete-sentinel" type="UPDATE" batch="false">
+				<statement>
+					<![CDATA[
+						UPDATE <TABLE/>
+						SET <FIELD name='deleted'/> = 1
+						WHERE <FIELD name='setinel-id'/> = ${setinel-id}
+						]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="sentinel-group-tbl" table="SENTINEL_GROUP_TBL" alias="sgt">
+		<relation name="dc-cluster-shard-info" entity-name="dc-cluster-shard-tbl" entity-alias="dcst"/>
+
+		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
+		<member name="shard-count" value-type="long" select-expr="COUNT(dcst.dc_cluster_shard_id) `shard-count`" all="false"/>
+
+		<readsets>
+			<readset name="COUNT">
+				<member name="count"/>
+			</readset>
+			<readset name="SHARD-COUNT">
+				<member name="shard-count"/>
+			</readset>
+			<readset name="SENTINEL-USAGE">
+				<readset-ref name="FULL"/>
+				<readset-ref name="SHARD-COUNT"/>
+			</readset>
+		</readsets>
+		<query-defs>
+			<query name='find-all' type='SELECT' multiple='true'>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='find-by-type' type='SELECT' multiple='true'>
+				<param name="cluster-type"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					AND <FIELD name='cluster-type'/> = ${cluster-type}
+					]]>
+				</statement>
+			</query>
+			<query name="find-sentinel-usage" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> LEFT JOIN <TABLE name='dc-cluster-shard-info'/>
+					ON <FIELD name='sentinel-id'/> = dcst.setinel_id AND dcst.deleted=0
+					GROUP BY <FIELD name='sentinel-id'/>
+					]]>
+				</statement>
+			</query>
+			<query name="delete-sentinel-group" type="UPDATE" batch="false">
+				<statement>
+					<![CDATA[
+						UPDATE <TABLE/>
+						SET <FIELD name='deleted'/> = 1
+						WHERE <FIELD name='sentinel-group-id'/> = ${sentinel-group-id}
+						]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="sentinel-tbl" table="SENTINEL_TBL" alias="st3">
+		<var name="dc-name" value-type="String"/>
+
+		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
+		<readsets>
+			<readset name="SENTINEL-DC-NAME">
+				<readset-ref name="FULL"/>
+				<readset-ref name="FULL" relation-name="dc-info"/>
+			</readset>
+		</readsets>
+		<query-defs>
+			<query name="find-by-sentinel-group-id" type="SELECT" multiple="true">
+				<param name="sentinel-group-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='sentinel-group-id'/> = ${sentinel-group-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-sentinel-group-id-deleted" type="SELECT" multiple="true">
+				<param name="sentinel-group-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='sentinel-group-id'/> = ${sentinel-group-id}
+					AND <FIELD name='deleted'/> = 1
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-dc-id" type="SELECT" multiple="true">
+				<param name="dc-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='dc-id'/> = ${dc-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-dc-name" type="SELECT" multiple="true">
+				<param name="dc-name"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name="dc-info"/>
+					WHERE <FIELD name='dc-id'/> = dt.id
+					AND dt.dc_name = ${dc-name}
+					AND dt.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-ip-port" type="SELECT" multiple="false">
+				<param name="sentinel-ip"/>
+				<param name="sentinel-port"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE sentinel_ip = ${sentinel-ip}
+					AND sentinel_port = ${sentinel-port}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='find-all' type='SELECT' multiple='true'>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-with-dc-name" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> INNER JOIN <TABLE name='dc-info'/> on <FIELD name='dc-id'/> = dt.id
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+
+<!--			<query name="update-sentinel-addr" type="UPDATE" batch="false">-->
+<!--				<statement>-->
+<!--					<![CDATA[-->
+<!--						UPDATE <TABLE/>-->
+<!--						SET <FIELD name='setinel-address'/> = ${setinel-address}-->
+<!--						WHERE <FIELD name='setinel-id'/> = ${setinel-id}-->
+<!--						]]>-->
+<!--				</statement>-->
+<!--			</query>-->
+
+			<query name="delete-sentinel" type="UPDATE" batch="false">
+				<statement>
+					<![CDATA[
+						UPDATE <TABLE/>
+						SET <FIELD name='deleted'/> = 1
+						WHERE <FIELD name='sentinel-id'/> = ${sentinel-id}
+						]]>
 				</statement>
 			</query>
 		</query-defs>
@@ -941,6 +1638,7 @@
 
 		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 		<relation name="keeper-info" entity-name="redis-tbl" entity-alias="kit"/>
+		<relation name="org-info" entity-name="organization-tbl" entity-alias="ot" />
 
 		<readsets>
 			<readset name="KEEPER_COUNT">
@@ -954,12 +1652,47 @@
 				<member name='keepercontainer-ip'/>
 				<member name='keepercontainer-port'/>
 				<member name="keepercontainer-active"/>
+				<member name="az-id"/>
 				<member name="keepercontainer-dc"/>
 				<member name="count"/>
 				<member name="keepercontainer-org-id" />
 			</readset>
+
+			<readset name="CONTAINER_ADDRESS">
+				<member name='keepercontainer-id'/>
+				<member name='keepercontainer-ip'/>
+				<member name='keepercontainer-port'/>
+			</readset>
+
+			<readset name="AZ_INFO">
+				<member name="az-id"/>
+			</readset>
+			<readset name="CONTAINER_ACTIVE">
+				<member name="keepercontainer-active"/>
+			</readset>
+			<readset name="DISK_TYPE">
+				<member name="keepercontainer_disk_type" />
+			</readset>
+
+			<readset name="BASE_INFO">
+				<readset-ref name="CONTAINER_ADDRESS" />
+				<readset-ref name="CONTAINER_ACTIVE"/>
+				<readset-ref name="AZ_INFO"/>
+				<readset-ref name="DISK_TYPE"/>
+				<readset-ref name="NAME" relation-name="org-info" />
+				<readset-ref name="NAME" relation-name="dc-info" />
+			</readset>
 		</readsets>
 		<query-defs>
+			<query name="find-all" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name="dc-info"/>
+					WHERE dt.deleted = 0
+					]]>
+				</statement>
+			</query>
 			<query name="find-by-dc-name" type="SELECT" multiple="true">
 				<param name="dc-name"/>
 				<statement>
@@ -969,6 +1702,17 @@
 					WHERE <FIELD name='keepercontainer-dc'/> = dt.id
 					AND dt.dc_name = ${dc-name}
 					AND dt.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-ip" type="SELECT" multiple="false">
+				<param name="keepercontainer-ip"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='keepercontainer-ip'/> = ${keepercontainer-ip}
 					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
@@ -1015,8 +1759,20 @@
 					AND <FIELD name='keepercontainer-active'/> = 1
 					AND <FIELD name='deleted'/> = 0
 					AND <FIELD name='keepercontainer-org-id'/> = ${org-id}
+					AND kit.redis_role = 'keeper'
 					GROUP BY <FIELD name='keepercontainer-id'/>
 					order by count
+					]]>
+				</statement>
+			</query>
+			<query name="find-by-az-id" type="SELECT" multiple="true">
+				<param name="az-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='az-id'/> = ${az-id}
+					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
 			</query>
@@ -1033,6 +1789,28 @@
 					]]>
 				</statement>
 			</query>
+			<query name="find-container-base-info" type="SELECT" multiple="true" >
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE /> LEFT JOIN <TABLE name='org-info' /> on <FIELD name='keepercontainer-org-id' /> = ot.id,
+						<TABLE name='dc-info' />
+					where <FIELD name='deleted' /> = 0
+					and <FIELD name='keepercontainer-dc' /> = dt.id
+					]]>
+				</statement>
+			</query>
+			<query name='delete-keeper-container' type='UPDATE' batch='false'>
+				<param name='keepercontainer-id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+					SET <FIELD name='deleted'/> = 1
+					WHERE <FIELD name='keepercontainer-id'/> = ${keepercontainer-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 		</query-defs>
 	</entity>
 
@@ -1041,12 +1819,20 @@
 		
 		<relation name="redundant-clusters" entity-name="migration-cluster-tbl" entity-alias="mct"/>
 		<relation name="redundant-shards" entity-name="migration-shard-tbl" entity-alias="mst"/>
-		
+
+		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
+
 		<readsets>
+			<readset name="COUNT">
+				<member name="count" />
+			</readset>
 			<readset name="FULL_ALL">
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="redundant-clusters"/>
 				<readset-ref name="FULL" relation-name="redundant-shards"/>
+			</readset>
+			<readset name="ID">
+				<member name="id" />
 			</readset>
 		</readsets>
 		
@@ -1059,6 +1845,26 @@
 					FROM <TABLE/>
 					WHERE <FIELD name='event-tag'/> = ${event-tag}
 					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-all" type="SELECT">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-latest-migration-events" type="SELECT" multiple="true">
+				<param name="data-change-last-time"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted' /> = 0
+					AND <FIELD name='data-change-last-time' /> > ${data-change-last-time}
 					]]>
 				</statement>
 			</query>
@@ -1115,19 +1921,241 @@
 	
 	<entity name="migration-cluster-tbl" table="migration_cluster_tbl" alias="mct">
 		<var name="event-id" value-type="long"/>
+		<var name="size" value-type="long" />
+		<var name="offset" value-type="long" />
+		<var name="operator" value-type="String" />
+		<var name="event-ids" value-type="java.util.List&lt;Long&gt;" />
+		<var name="from" value-type="Date" />
+		<var name="to" value-type="Date" />
+		<var name="clusters" value-type="java.util.Set&lt;String&gt;" />
+
+		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
+		<member name="migEventCnt" value-type="long" select-expr=" COUNT(distinct mct.migration_event_id) migEventCnt" all="false" />
 
 		<relation name="cluster" entity-name="cluster-tbl" entity-alias="ct"/>
 		<relation name="migration-event" entity-name="migration-event-tbl" entity-alias="met"/>
 		<relation name="migration-shards" entity-name="migration-shard-tbl" entity-alias="mst" multiple="true"/>
 		
 		<readsets>
+			<readset name="COUNT" >
+				<member name="count" />
+			</readset>
+			<readset name="MIG_EVENT_CNT">
+				<member name="migEventCnt" />
+			</readset>
+			<readset name="MIG_EVENT_ID">
+				<member name="migration-event-id" />
+			</readset>
+			<readset name="STATUS" >
+				<member name="status" />
+			</readset>
 			<readset name="FULL_ALL">
 				<readset-ref name="FULL"/>
 				<readset-ref name="FULL" relation-name="cluster"/>
+				<readset-ref name="FULL" relation-name="migration-event" />
 			</readset>
+			<readset name="EVENT_WITH_CLUSTER">
+				<readset-ref name="STATUS"/>
+				<readset-ref name="FULL" relation-name="migration-event" />
+				<readset-ref name="NAME" relation-name="cluster" />
+			</readset>
+			<readset name="FULL_WITH_CLUSTER_NAME">
+				<readset-ref name="FULL"/>
+				<readset-ref name="NAME_AND_ORG" relation-name="cluster" />
+				<readset-ref name="FULL" relation-name="migration-event" />
+			</readset>
+			<readset name="MIGRATION_CLUSTER_STATUS">
+				<readset-ref name="FULL"/>
+				<readset-ref name="NAME" relation-name="cluster" />
+			</readset>
+
 		</readsets>
 		
 		<query-defs>
+			<query name="find-latest-migration-clusters" type="SELECT" multiple="true">
+				<param name="data-change-last-time"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted' /> = 0
+					AND <FIELD name='data-change-last-time' /> > ${data-change-last-time}
+					]]>
+				</statement>
+			</query>
+
+			<query name="find-migration-clusters-by-name-and-time" type="SELECT" multiple="true">
+				<param name="clusters"/>
+				<param name="from"/>
+				<param name="to"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE name='cluster'/>, <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0 AND ct.deleted = 0
+					AND <FIELD name='cluster-id'/> = ct.id
+					AND ct.cluster_name IN <IN>${clusters}</IN>
+					AND <FIELD name='start-time'/> >= ${from}
+					AND <FIELD name='start-time'/> <= ${to}
+					]]>
+				</statement>
+			</query>
+
+			<query name="find-latest-migration-clusters-with-cluster-name" type="SELECT" multiple="true">
+				<param name="data-change-last-time"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster'/>, <TABLE name='migration-event'/>
+					WHERE <FIELD name='deleted' /> = 0
+					AND <FIELD name='cluster-id'/> = ct.id
+					AND <FIELD name='migration-event-id'/> = met.id
+					AND <FIELD name='data-change-last-time' /> > ${data-change-last-time}
+					]]>
+				</statement>
+			</query>
+
+			<query name="find-migration-clusters" type="SELECT" multiple="true">
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM (<TABLE/> JOIN (
+						SELECT * FROM <TABLE name='migration-event' />
+						WHERE deleted = 0
+						ORDER BY id DESC LIMIT ${size} OFFSET ${offset}
+					) met on mct.migration_event_id=met.id)
+					JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+					order by met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-cluster" type="SELECT" multiple="true">
+				<param name="cluster-id" />
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM (<TABLE/>
+						JOIN (SELECT * FROM <TABLE name='migration-event' /> WHERE id in (
+							SELECT migration_event_id FROM (
+								SELECT migration_event_id from <TABLE />
+									WHERE <FIELD name='cluster-id' /> = ${cluster-id} AND deleted=0
+									ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}) event
+							)
+						) met on <FIELD name='migration-event-id' />=met.id)
+						JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+						ORDER BY met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-operator" type="SELECT" multiple="true">
+				<param name="operator"/>
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM (<TABLE/>
+						JOIN (SELECT * FROM <TABLE name='migration-event' /> WHERE id in (
+							SELECT migration_event_id FROM (
+								SELECT migration_event_id from <TABLE />, <TABLE name='migration-event' />
+									WHERE <FIELD name='migration-event-id'/> = met.id
+									AND met.operator = ${operator} AND <FIELD name='deleted' /> = 0
+									ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}) event
+							)
+						) met on <FIELD name='migration-event-id' />=met.id)
+						JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+						ORDER BY met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-status" type="SELECT" multiple="true">
+				<param name="status"/>
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM (<TABLE/>
+						JOIN (SELECT * FROM <TABLE name='migration-event' /> WHERE id in (
+							SELECT migration_event_id FROM (
+								SELECT migration_event_id from <TABLE />
+									WHERE <FIELD name='status' /> = ${status} AND deleted=0
+									ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}) event
+							)
+						) met on <FIELD name='migration-event-id' />=met.id)
+						JOIN <TABLE name='cluster' /> on <FIELD name='cluster-id'/>=ct.id
+						ORDER BY met.id DESC
+					]]>
+				</statement>
+			</query>
+			<query name="count-all-by-cluster" type="SELECT">
+				<param name="cluster-id" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>
+					WHERE <FIELD name='cluster-id'/> = ${cluster-id}
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-all-by-operator" type="SELECT">
+				<param name="operator" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>, <TABLE name='migration-event' />
+					WHERE <FIELD name='migration-event-id'/> = met.id
+					AND met.operator = ${operator}
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="count-all-by-status" type="SELECT">
+				<param name="status" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>
+					WHERE <FIELD name='status'/> = ${status}
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-events-without-test-cluster" type="SELECT" multiple="true">
+				<param name="size"/>
+				<param name="offset"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>, <TABLE name='cluster' />
+					WHERE <FIELD name='cluster-id'/> = ct.id
+					AND ct.cluster_name not like 'test\_%'
+					AND <FIELD name='deleted' /> = 0
+					GROUP BY <FIELD name='migration-event-id'/>
+					ORDER BY <FIELD name='migration-event-id'/> DESC LIMIT ${size} OFFSET ${offset}
+					]]>
+				</statement>
+			</query>
+			<query name="find-migration-clusters-by-mig-events" type="SELECT" multiple="true">
+				<param name="event-ids"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>, <TABLE name='migration-event' />, <TABLE name='cluster' />
+					WHERE <FIELD name='migration-event-id'/> IN <IN>${event-ids}</IN>
+					AND <FIELD name='cluster-id'/> = ct.id
+					AND <FIELD name='migration-event-id'/> = met.id
+					ORDER BY <FIELD name='migration-event-id'/> DESC
+					]]>
+				</statement>
+			</query>
+			<query name="count-events-without-test-cluster" type="SELECT">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS /> FROM <TABLE/>, <TABLE name='cluster' />
+					WHERE <FIELD name='cluster-id'/> = ct.id
+					AND ct.cluster_name not like 'test\_%'
+					AND <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
 			<query name="find-by-event-id" type="SELECT" multiple="true">
 				<param name="event-id"/>
 				<statement>
@@ -1150,11 +2178,9 @@
 				<statement>
 					<![CDATA[
 					SELECT <FIELDS/>
-					FROM <TABLE/>,<TABLE name="migration-event"/>
+					FROM <TABLE/>
 					WHERE <FIELD name='migration-event-id'/> = ${event-id}
 					AND <FIELD name="cluster-id"/> = ${cluster-id}
-					AND met.id = ${event-id}
-					AND met.deleted = 0
 					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
@@ -1280,6 +2306,15 @@
 			</readset>
 		</readsets>
 
+		<updatesets>
+			<updateset name="VALUE_AND_UNTIL" >
+				<member name="value" />
+				<member name="until" />
+				<member name="latest-update-user" />
+				<member name ="latest-update-ip" />
+			</updateset>
+		</updatesets>
+
 		<query-defs>
 			<query name="update-by-key" type="UPDATE" batch="false">
 				<param name="key"/>
@@ -1293,7 +2328,7 @@
 				</statement>
 			</query>
 
-			<query name="update-val-and-until-by-key" type="UPDATE" batch="false">
+			<query name="update-val-and-until-by-key-and-sub-key" type="UPDATE" batch="false">
 				<statement>
 					<![CDATA[
 					UPDATE <TABLE/>
@@ -1302,12 +2337,42 @@
 					<FIELD name='latest-update-user' /> = ${latest-update-user},
 					<FIELD name='latest-update-ip' /> = ${latest-update-ip}
 					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='sub-key'/> = ${sub-key}
 					]]>
 				</statement>
 			</query>
 
+			<query name="find-all-by-key-and-value-and-until-after" type="SELECT" multiple="true">
+				<param name="key"/>
+				<param name="value"/>
+				<param name="until"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='value'/> = ${value}
+					AND <FIELD name='until'/> > ${until}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
 
-			<query name="find-by-key" type="SELECT" multiple="false">
+			<query name="find-by-key-and-sub-key" type="SELECT" multiple="false">
+				<param name="key"/>
+				<param name="sub-key"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='sub-key'/> = ${sub-key}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+
+			<query name="find-by-key" type="SELECT" multiple="true">
 				<param name="key"/>
 				<statement>
 					<![CDATA[
@@ -1318,8 +2383,22 @@
 					]]>
 				</statement>
 			</query>
+
+			<query name="update-by-key-and-sub-key-and-change-time" type="UPDATE">
+				<param name="key"/>
+				<param name="sub-key"/>
+				<param name="data-change-last-time" />
+				<statement><![CDATA[UPDATE <TABLE/>
+					SET <FIELDS/>
+					WHERE <FIELD name='key'/> = ${key}
+					AND <FIELD name='sub-key'/> = ${sub-key}
+					AND <FIELD name='deleted'/> = 0
+					AND <FIELD name='data-change-last-time'/> = ${data-change-last-time}
+				]]></statement>
+			</query>
 		</query-defs>
 	</entity>
+
 	<entity name="organization-tbl" table="organization_tbl" alias="ot">
 		<member name="id" field="id" value-type="Long" length="20" nullable="true" key="true" auto-increment="true" />
 
@@ -1332,6 +2411,9 @@
 			<readset name="id-and-name">
 				<member name='id'/>
 				<member name='org-name'/>
+			</readset>
+			<readset name="NAME">
+				<member name="org-name"/>
 			</readset>
 		</readsets>
 
@@ -1401,6 +2483,7 @@
 			</query>
 		</query-defs>
 	</entity>
+
 	<entity name="event-tbl" table="event_tbl" alias="et">
 
 		<var name="target-event-type" value-type="String"/>
@@ -1432,7 +2515,10 @@
 
 		</query-defs>
 	</entity>
+
 	<entity name="proxy-tbl" table="proxy_tbl" alias="pt">
+		<var name="dc-name" value-type="String"/>
+		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
 
 		<readsets>
 			<readset name="id-dc-uri">
@@ -1454,13 +2540,39 @@
 					]]>
 				</statement>
 			</query>
-			<query name="find-all-monitor-active" type="SELECT" multiple="true">
+			<query name="find-all-active-by-dc" type="SELECT" multiple="true">
+				<param name='dc-id'/>
 				<statement>
 					<![CDATA[
 					SELECT <FIELDS/>
 					FROM <TABLE/>
 					WHERE <FIELD name='deleted'/> = 0
+					AND <FIELD name='active'/> = 1
+					AND <FIELd name='dc-id'/> = ${dc-id}
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-monitor-active-by-dc" type="SELECT" multiple="true">
+				<param name="dc-name"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='dc-info'/>
+					WHERE dt.dc_name = ${dc-name}
+					AND <FIELD name='dc-id'/> = dt.id
 					AND <FIELD name='monitor-active'/> = 1
+					AND <FIELD name='deleted'/> = 0
+					AND dt.deleted = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-monitor-active" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>,
+					WHERE <FIELD name='monitor-active'/> = 1
+					AND <FIELD name='deleted'/> = 0
 					]]>
 				</statement>
 			</query>
@@ -1486,6 +2598,7 @@
 			</query>
 		</query-defs>
 	</entity>
+
 	<entity name="route-tbl" table="route_tbl" alias="routetbl">
 
 		<readsets>
@@ -1493,24 +2606,28 @@
 				<member name='id'/>
 				<member name="tag"/>
 				<member name="active"/>
+				<member name="is-public"/>
 				<member name='route_org_id'/>
 				<member name="src_dc_id"/>
 				<member name="dst_dc_id"/>
 				<member name="src_proxy_ids"/>
 				<member name="dst_proxy_ids"/>
 				<member name="optional_proxy_ids"/>
+				<member name="description"/>
 			</readset>
 		</readsets>
 		<updatesets>
 			<updateset name="main">
 				<member name="tag"/>
 				<member name="active"/>
+				<member name="is-public"/>
 				<member name='route_org_id'/>
 				<member name="src_dc_id"/>
 				<member name="dst_dc_id"/>
 				<member name="src_proxy_ids"/>
 				<member name="dst_proxy_ids"/>
 				<member name="optional_proxy_ids"/>
+				<member name="description"/>
 			</updateset>
 		</updatesets>
 		<query-defs>
@@ -1521,6 +2638,48 @@
 					FROM <TABLE/>
 					WHERE <FIELD name='deleted'/> = 0
 					AND <FIELD name='active'/> = 1
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-active-by-tag" type="SELECT" multiple="true">
+				<param name='tag'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					AND <FIELD name='active'/> = 1
+					AND <FIELD name='tag'/> = ${tag}
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-active-by-tag-and-src-dc" type="SELECT" multiple="true">
+				<param name='tag'/>
+				<param name="src-dc-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					AND <FIELD name='active'/> = 1
+					AND <FIELD name='tag'/> = ${tag}
+					AND <FIELD name='src-dc-id'/> = ${src-dc-id}
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-active-by-tag-direction" type="SELECT" multiple="true">
+				<param name='tag'/>
+				<param name="src-dc-id"/>
+				<param name="dst-dc-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					AND <FIELD name='active'/> = 1
+					AND <FIELD name='tag'/> = ${tag}
+					AND <FIELD name='src-dc-id'/> = ${src-dc-id}
+					AND <FIELD name='dst-dc-id'/> = ${dst-dc-id}
 					]]>
 				</statement>
 			</query>
@@ -1546,4 +2705,663 @@
 			</query>
 		</query-defs>
 	</entity>
+
+	<entity name="zone-tbl" table="zone_tbl" alias="zonetbl">
+		<query-defs>
+			<query name="find-all-zones" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="az-tbl" table="az_tbl" alias="at3">
+		<readsets>
+			<readset name="NAME">
+				<member name='az-name'/>
+			</readset>
+		</readsets>
+
+		<query-defs>
+			<query name="find-active-available-zone-by-dc" type="SELECT" multiple="true">
+				<param name='dc-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='dc-id'/> = ${dc-id}
+					AND <FIELD name='deleted'/> = 0
+					AND <FIELD name='active'/> = 1
+					]]>
+				</statement>
+			</query>
+			<query name="find-available-zone-by-dc" type="SELECT" multiple="true">
+				<param name='dc-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='dc-id'/> = ${dc-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-available-zone-by-az" type="SELECT" multiple="false">
+				<param name="az-name"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='az-name'/> = ${az-name}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-available-zone" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-active-available-zone" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					AND <FIELD name='active'/> = 1
+					]]>
+				</statement>
+			</query>
+			<query name='delete-available-zone' type='UPDATE' batch='false'>
+				<param name='id'/>
+				<param name="az-name"/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+					SET <FIELD name='deleted'/> = 1 , <FIELD name='az-name'/> = ${az-name}
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="redis-check-rule-tbl" table="redis_check_rule_tbl" alias="rcrt">
+		<query-defs>
+			<query name="find-redis-check-rule-by-id" type="SELECT" multiple="false">
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-redis-check-rules-by-param" type="SELECT" multiple="false">
+				<param name="param"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='param'/>  = ${param}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-redis-check-rules-by-checkerType" type="SELECT" multiple="true">
+				<param name="check-type"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='check-type'/>  = ${check-type}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-redis-check-rules" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='delete-redis-check-rule' type='UPDATE' batch='false'>
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+					SET <FIELD name='deleted'/> = 1
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="appliercontainer-tbl" table="appliercontainer_tbl" alias="at2">
+		<var name="dc-name" value-type="String"/>
+		<var name="org-id" value-type="long"/>
+
+		<member name="count" value-type="long" select-expr="COUNT(*) count" all="false"/>
+
+		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
+		<relation name="applier-info" entity-name="applier-tbl" entity-alias="at"/>
+		<relation name="org-info" entity-name="organization-tbl" entity-alias="ot" />
+
+
+		<readsets>
+			<readset name="APPLIER_COUNT">
+				<member name='appliercontainer-id'/>
+				<member name='appliercontainer-ip'/>
+				<member name="count"/>
+			</readset>
+
+			<readset name="APPLIER_COUNT_BY_CLUSTER">
+				<member name='appliercontainer-id'/>
+				<member name='appliercontainer-ip'/>
+				<member name='appliercontainer-port'/>
+				<member name="appliercontainer-active"/>
+				<member name="appliercontainer-az"/>
+				<member name="appliercontainer-dc"/>
+				<member name="count"/>
+				<member name="appliercontainer-org" />
+			</readset>
+
+			<readset name="AZ_INFO">
+				<member name="appliercontainer-az"/>
+			</readset>
+
+			<readset name="CONTAINER_ADDRESS">
+				<member name='appliercontainer-id'/>
+				<member name='appliercontainer-ip'/>
+				<member name='appliercontainer-port'/>
+			</readset>
+
+
+			<readset name="BASE_INFO">
+				<readset-ref name="CONTAINER_ADDRESS" />
+				<readset-ref name="AZ_INFO"/>
+				<readset-ref name="NAME" relation-name="org-info" />
+				<readset-ref name="NAME" relation-name="dc-info" />
+			</readset>
+		</readsets>
+
+		<query-defs>
+			<query name="find-all-appliercontainers-by-dc" type="SELECT" multiple="true">
+				<param name="appliercontainer-dc"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/> FROM <TABLE/> WHERE <FIELD name='appliercontainer-dc'/> = ${appliercontainer-dc}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-active-appliercontainers-by-dc" type="SELECT" multiple="true">
+				<param name="appliercontainer-dc"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/> FROM <TABLE/> WHERE <FIELD name='appliercontainer-dc'/> = ${appliercontainer-dc}
+					AND <FIELD name='deleted'/> = 0
+					AND <FIELD name='appliercontainer-active'/> = 1
+					]]>
+				</statement>
+			</query>
+			<query name="find-applier-count" type="SELECT" multiple="true">
+				<param name="dc-name"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join  <TABLE name='applier-info'/> on <FIELD name='appliercontainer-id'/> = at.container_id , <TABLE name='dc-info'/>
+					WHERE <FIELD name='appliercontainer-dc'/> = dt.id
+					AND dt.dc_name = ${dc-name}
+					AND <FIELD name='appliercontainer-active'/> = 1
+					AND (at.deleted = 0 or at.deleted is null)
+					AND <FIELD name='deleted'/> = 0
+					GROUP BY <FIELD name='appliercontainer-id'/>
+					order by count
+					]]>
+				</statement>
+			</query>
+			<query name="find-applier-containers-by-dc-and-org" type="SELECT" multiple="true">
+				<param name="dc-name"/>
+				<param name="org-id" />
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/> left join  <TABLE name='applier-info'/> on <FIELD name='appliercontainer-id'/> = at.container_id AND (at.deleted = 0 or at.deleted is null), <TABLE name='dc-info'/>
+					WHERE <FIELD name='appliercontainer-dc'/> = dt.id
+					AND dt.dc_name = ${dc-name}
+					AND <FIELD name='appliercontainer-active'/> = 1
+					AND <FIELD name='deleted'/> = 0
+					AND <FIELD name='appliercontainer-org'/> = ${org-id}
+					GROUP BY <FIELD name='appliercontainer-id'/>
+					order by count
+					]]>
+				</statement>
+			</query>
+			<query name="find-appliercontainers-by-az" type="SELECT" multiple="true">
+				<param name="appliercontainer-az"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='appliercontainer-az'/> = ${appliercontainer-az}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-appliercontainer-by-ip-port" type="SELECT" multiple="false">
+				<param name="appliercontainer-ip"/>
+				<param name="appliercontainer-port"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='appliercontainer-ip'/> = ${appliercontainer-ip}
+					AND <FIELD name='appliercontainer-port'/> = ${appliercontainer-port}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-applier-containers" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />
+					where <FIELD name='deleted' /> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-applier-container-base-infos" type="SELECT" multiple="true" >
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE /> LEFT JOIN <TABLE name='org-info' /> on <FIELD name='appliercontainer-org' /> = ot.id,
+						 <TABLE name='dc-info' />
+					where <FIELD name='deleted' /> = 0
+					and <FIELD name='appliercontainer-dc' /> = dt.id
+					]]>
+				</statement>
+			</query>
+			<query name='delete-applier-container' type='UPDATE' batch='false'>
+				<param name='appliercontainer-id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+					SET <FIELD name='deleted'/> = 1
+					WHERE <FIELD name='appliercontainer-id'/> = ${appliercontainer-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="applier-tbl" table="applier_tbl" alias="at">
+		<member name="count" value-type="long" select-expr="COUNT(at.id) count" all="false"/>
+		<var name="key-id" value-type="Long" key-member="id" />
+		<var name="dc-cluster-shard-id" value-type="Long"/>
+		<var name="to-dc-id" value-type="Long"/>
+
+		<var name="dc-name" value-type="String"/>
+		<var name="cluster-id" value-type="Long"/>
+
+		<var name="shard-ids" value-type="java.util.List&lt;Long&gt;" />
+
+		<relation name="dc-info" entity-name="dc-tbl" entity-alias="dt"/>
+		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
+		<relation name="dc-cluster-info" entity-name="dc-cluster-tbl" entity-alias="dct"/>
+		<relation name="dc-cluster-shard-info" entity-name="dc-cluster-shard-tbl" entity-alias="dcst"/>
+		<relation name="shard-info" entity-name="shard-tbl" entity-alias="st2" />
+		<relation name="repl-direction-info" entity-name="repl-direction-tbl" entity-alias="rdt" />
+
+		<readsets>
+			<readset name="IP-AND-PORT">
+				<member name='ip'/>
+				<member name="port"/>
+			</readset>
+			<readset name="APPLIER_META_INFO">
+				<member name="ip"/>
+				<member name="port"/>
+				<member name="active"/>
+				<member name="container-id"/>
+			</readset>
+			<readset name="CONTAINER_ID">
+				<member name="container-id" />
+			</readset>
+			<readset name="CONTAINER_APPLIER_COUNT">
+				<member name="count" />
+			</readset>
+			<readset name="CONTAINER_LOAD" >
+				<readset-ref name="CONTAINER_ID" />
+				<readset-ref name="CONTAINER_APPLIER_COUNT" />
+				<readset-ref name="CLUSTER_COUNT_AND_SHARD_COUNT" relation-name="dc-cluster-shard-info" />
+			</readset>
+			<readset name="CLUSTER_ID">
+				<readset-ref name="CLUSTER_ID" relation-name="dc-cluster-info" />
+			</readset>
+			<readset name="FULL_WITH_SHARD_AND_REPL_INFO">
+				<readset-ref name="FULL" />
+				<readset-ref name="FULL" relation-name="shard-info"/>
+				<readset-ref name="FULL" relation-name="repl-direction-info"/>
+			</readset>
+		</readsets>
+
+		<query-defs>
+			<query name='count-container-applier-and-cluster-and-shard' type='SELECT' multiple='true'>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-shard-info' />, <TABLE name='repl-direction-info' />,
+					 <TABLE name='dc-cluster-info' />, <TABLE name='cluster-info' />
+					WHERE <FIELD name='shard-id' /> = dcst.shard_id
+					AND <FIELD name='repl-direction-id' /> = rdt.id
+					AND ct.id = rdt.cluster_id
+					AND ct.activedc_id = dct.dc_id
+					AND dct.dc_cluster_id = dcst.dc_cluster_id
+					AND dct.deleted = 0
+					AND rdt.deleted = 0
+					AND <FIELD name='deleted' /> = 0
+					AND dcst.deleted = 0
+					AND ct.deleted = 0
+					GROUP BY <FIELD name='container-id' />
+        			]]>
+				</statement>
+			</query>
+
+			<query name='find-appliers-by-dc-cluster-shard' type='SELECT' multiple='true'>
+				<param name="dc-cluster-shard-id"/>
+				<statement>
+					<![CDATA[
+					SELECT DISTINCT <FIELDS />
+					FROM <TABLE />, <TABLE name='dc-cluster-shard-info'/>,
+					<TABLE name='repl-direction-info'/>, <TABLE name='dc-cluster-info'/>, <TABLE name='cluster-info' />
+					WHERE dcst.dc_cluster_shard_id = ${dc-cluster-shard-id}
+					AND <FIELD name='shard-id' /> = dcst.shard_id
+					AND dcst.dc_cluster_id = dct.dc_cluster_id
+					AND ct.id = rdt.cluster_id
+					AND ct.activedc_id = dct.dc_id
+					AND <FIELD name='repl-direction-id'/> = rdt.id
+					AND dct.deleted = 0
+					AND rdt.deleted = 0
+					AND <FIELD name='deleted' /> = 0
+					AND dcst.deleted = 0
+					AND ct.deleted = 0
+        			]]>
+				</statement>
+			</query>
+
+			<query name='find-appliers-by-cluster-and-to-dc' type='SELECT' multiple='true'>
+				<param name="to-dc-id"/>
+				<param name="cluster-id"/>
+				<statement>
+					<![CDATA[
+					SELECT DISTINCT <FIELDS />
+					FROM <TABLE />
+					WHERE <FIELD name='repl-direction-id' /> in (
+						SELECT id from <TABLE name='repl-direction-info' />
+						WHERE rdt.to_dc_id = ${to-dc-id}
+						AND rdt.cluster_id = ${cluster-id}
+						AND rdt.deleted = 0
+					)
+					AND <FIELD name='shard-id' /> in (
+						SELECT id from <TABLE name='shard-info' />
+						WHERE st2.cluster_id = ${cluster-id}
+						AND st2.deleted = 0
+					)
+					AND <FIELD name='deleted' /> = 0
+        			]]>
+				</statement>
+			</query>
+
+			<query name='find-by-ip-port' type='SELECT' multiple="false">
+				<param name='ip'/>
+				<param name='port'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='ip' /> = ${ip}
+				    AND <FIELD name='port' /> = ${port}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='find-all-by-shard' type='SELECT' multiple="true">
+				<param name='shard-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='shard-id' /> = ${shard-id}
+					AND <FIELD name='deleted'/> = 0
+					ORDER BY <FIELD name='id'/>
+					]]>
+				</statement>
+			</query>
+			<query name='find-all' type='SELECT' multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='shard-info'/>, <TABLE name='repl-direction-info'/>
+					WHERE <FIELD name='shard-id'/> = st2.id
+					AND <FIELD name='repl-direction-id'/> = rdt.id
+					AND <FIELD name='deleted'/> = 0
+					ORDER BY <FIELD name='id'/>
+					]]>
+				</statement>
+			</query>
+			<query name='find-all-by-shard-and-repl-direction' type='SELECT' multiple="true">
+				<param name='shard-id'/>
+				<param name='repl-direction-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='shard-id' /> = ${shard-id}
+					AND <FIELD name='repl-direction-id' /> = ${repl-direction-id}
+					AND <FIELD name='deleted'/> = 0
+					ORDER BY <FIELD name='id'/>
+					]]>
+				</statement>
+			</query>
+			<query name='find-appliers-by-shard-ids' type='SELECT' multiple="true">
+				<param name='shard-ids'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='shard-id'/> IN <IN>${shard-ids}</IN>
+					AND <FIELD name='deleted'/> = 0
+					ORDER BY <FIELD name='id'/>
+					]]>
+				</statement>
+			</query>
+			<query name='find-by-ip' type='SELECT' multiple="true">
+				<param name='ip'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='ip' /> = ${ip}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='delete-batch' type="UPDATE" batch="true">
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+        			SET <FIELD name='deleted'/> = 1, <FIELD name='deleted-at'/> = UNIX_TIMESTAMP()
+       				WHERE <FIELD name='id'/> = ${id}
+        			AND <FIELD name='deleted'/> = 0
+        			]]>
+				</statement>
+			</query>
+			<query name='insert-batch' type='INSERT' batch='true'>
+				<statement>
+					<![CDATA[
+					INSERT INTO <TABLE/>(<FIELDS/>)
+        			VALUES(<VALUES/>)
+        			]]>
+				</statement>
+			</query>
+			<query name='update-batch' type='UPDATE' batch='true'>
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+        			SET <FIELD name='ip'/> = ${ip}, <FIELD name='port'/> = ${port},
+        				<FIELD name='active'/> = ${active}, <FIELD name='container-id'/> = ${container-id}
+       				WHERE <FIELD name='id'/> = ${id}
+        			AND <FIELD name='deleted'/> = 0
+        			]]>
+				</statement>
+			</query>
+			<query name='update-batch-applier-active' type='UPDATE' batch='true'>
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+        			SET <FIELD name='active'/> = ${active}
+       				WHERE <FIELD name='id'/> = ${id}
+        			AND <FIELD name='deleted'/> = 0
+        			]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
+
+	<entity name="repl-direction-tbl" table="repl_direction_tbl" alias="rdt">
+		<relation name="cluster-info" entity-name="cluster-tbl" entity-alias="ct"/>
+		<readsets>
+			<readset name="REPL_DIRECTION_CLUSTER_INFO">
+				<readset-ref name="FULL"/>
+				<readset-ref name="CLUSTER_META_INFO" relation-name="cluster-info"/>
+			</readset>
+		</readsets>
+		<query-defs>
+			<query name="find-repl-directions-by-cluster" type="SELECT" multiple="true">
+				<param name='cluster-id'/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='cluster-id'/> = ${cluster-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-repl-directions-by-cluster-and-to-dc" type="SELECT" multiple="true">
+				<param name='cluster-id'/>
+				<param name="to-dc-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='cluster-id'/> = ${cluster-id}
+					AND <FIELD name='to-dc-id'/> = ${to-dc-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-repl-direction-by-cluster-and-src-to-dc" type="SELECT">
+				<param name="cluster-id"/>
+				<param name='src-dc-id'/>
+				<param name="to-dc-id"/>
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>
+					WHERE  <FIELD name='cluster-id'/> = ct.id
+					AND ct.activedc_id =
+					AND <FIELD name='to-dc-id'/> = ${to-dc-id}
+					AND <FIELD name='cluster-id'/> = ${cluster-id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-repl-direction-join-cluster-tbl" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>, <TABLE name='cluster-info'/>
+					WHERE <FIELD name='cluster-id'/> = ct.id
+					AND ct.deleted = 0
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name="find-all-repl-directions" type="SELECT" multiple="true">
+				<statement>
+					<![CDATA[
+					SELECT <FIELDS/>
+					FROM <TABLE/>
+					WHERE <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='delete-repl-direction' type='UPDATE' batch='false'>
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+					SET <FIELD name='deleted'/> = 1
+					WHERE <FIELD name='id'/> = ${id}
+					AND <FIELD name='deleted'/> = 0
+					]]>
+				</statement>
+			</query>
+			<query name='delete-batch' type="UPDATE" batch="true">
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+        			SET <FIELD name='deleted'/> = 1
+       				WHERE <FIELD name='id'/> = ${id}
+        			AND <FIELD name='deleted'/> = 0
+        			]]>
+				</statement>
+			</query>
+			<query name='insert-batch' type='INSERT' batch='true'>
+				<statement>
+					<![CDATA[
+					INSERT INTO <TABLE/>(<FIELDS/>)
+        			VALUES(<VALUES/>)
+        			]]>
+				</statement>
+			</query>
+			<query name='update-batch' type='UPDATE' batch='true'>
+				<param name='id'/>
+				<statement>
+					<![CDATA[
+					UPDATE <TABLE/>
+        			SET <FIELD name='src-dc-id'/> = ${src-dc-id}, <FIELD name='to-dc-id'/> = ${to-dc-id},
+        			<FIELD name='from-dc-id'/> = ${from-dc-id}, <FIELD name='cluster-id'/> = ${cluster-id},
+        			<FIELD name='target-cluster-name'/> = ${target-cluster-name}
+       				WHERE <FIELD name='id'/> = ${id}
+        			AND <FIELD name='deleted'/> = 0
+        			]]>
+				</statement>
+			</query>
+		</query-defs>
+	</entity>
 </entities>
+

@@ -76,7 +76,7 @@ public class TestMetaServer extends AbstractLifecycle{
 		context = application.run(new String[]{});
 		
 		TestZkClient client = context.getBean(TestZkClient.class);
-		DefaultZkConfig zkConfig = new DefaultZkConfig();
+		DefaultZkConfig zkConfig = new DefaultZkConfig(client.getZkAddress());
 		zkConfig.setZkSessionTimeoutMillis(zkSessionTimeoutMillis);
 		client.setZkConfig(zkConfig);
 		client.setZkAddress(zkConnectionStr);
@@ -156,7 +156,7 @@ public class TestMetaServer extends AbstractLifecycle{
 	
 	public String getAddress(){
 		
-		return String.format("http://localhost:%d", getServerPort());
+		return String.format("http://127.0.0.1:%d", getServerPort());
 	}
 	
 	public static int getWaitforrestarttimemills() {

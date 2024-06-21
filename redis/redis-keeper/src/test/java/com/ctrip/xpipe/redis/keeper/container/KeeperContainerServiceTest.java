@@ -1,22 +1,28 @@
 package com.ctrip.xpipe.redis.keeper.container;
 
+import com.ctrip.xpipe.AbstractTest;
 import com.ctrip.xpipe.api.cluster.LeaderElectorManager;
 import com.ctrip.xpipe.api.lifecycle.ComponentRegistry;
 import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
 import com.ctrip.xpipe.redis.core.entity.KeeperTransMeta;
-import com.ctrip.xpipe.redis.core.metaserver.MetaServerKeeperService;
+import com.ctrip.xpipe.redis.core.store.ClusterId;
+import com.ctrip.xpipe.redis.core.store.ReplId;
+import com.ctrip.xpipe.redis.core.store.ShardId;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.config.DefaultKeeperConfig;
 import com.ctrip.xpipe.redis.keeper.config.KeeperConfig;
 import com.ctrip.xpipe.redis.keeper.config.KeeperContainerConfig;
 import com.ctrip.xpipe.redis.keeper.exception.RedisKeeperRuntimeException;
+import com.ctrip.xpipe.redis.keeper.health.HealthState;
 import com.ctrip.xpipe.redis.keeper.monitor.KeepersMonitorManager;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.Mockito.*;
@@ -24,25 +30,28 @@ import static org.mockito.Mockito.*;
 /**
  * @author Jason Song(song_s@ctrip.com)
  */
-@RunWith(MockitoJUnitRunner.class)
-public class KeeperContainerServiceTest {
+@RunWith(MockitoJUnitRunner.Silent.class)
+public class KeeperContainerServiceTest extends AbstractTest {
 
     private KeeperConfig keeperConfig = new DefaultKeeperConfig();
 
 	@Mock
     private LeaderElectorManager leaderElectorManager;
     @Mock
-    private MetaServerKeeperService metaService;
-    @Mock
     private KeeperContainerConfig keeperContainerConfig;
     @Mock
     private ComponentRegistry componentRegistry;
     @Mock
     private KeepersMonitorManager keepersMonitorManager;
+    @Mock
+    private ContainerResourceManager containerResourceManager;
+    @Mock
+    private RedisKeeperServer redisKeeperServer;
     
     private KeeperContainerService keeperContainerService;
-    private String someCluster;
-    private String someShard;
+    private ClusterId someClusterId;
+    private ShardId someShardId;
+    private ReplId someReplId;
     private int somePort;
     private KeeperTransMeta someKeeperTransMeta;
     private KeeperMeta someKeeperMeta;
@@ -52,24 +61,27 @@ public class KeeperContainerServiceTest {
         keeperContainerService = new KeeperContainerService();
 
         ReflectionTestUtils.setField(keeperContainerService, "leaderElectorManager", leaderElectorManager);
-        ReflectionTestUtils.setField(keeperContainerService, "metaService", metaService);
         ReflectionTestUtils.setField(keeperContainerService, "leaderElectorManager", leaderElectorManager);
         ReflectionTestUtils.setField(keeperContainerService, "keeperContainerConfig", keeperContainerConfig);
         ReflectionTestUtils.setField(keeperContainerService, "keeperConfig", keeperConfig);
         ReflectionTestUtils.setField(keeperContainerService, "keepersMonitorManager", keepersMonitorManager);
+        ReflectionTestUtils.setField(keeperContainerService, "containerResourceManager", containerResourceManager);
 
-        someCluster = "someCluster";
-        someShard = "someShard";
+        someClusterId = ClusterId.from(randomLong());
+        someShardId = ShardId.from(randomLong());
+        someReplId = ReplId.from(randomLong());
         somePort = 6789;
 
         someKeeperMeta = new KeeperMeta();
         someKeeperMeta.setPort(somePort);
         someKeeperTransMeta = new KeeperTransMeta();
-        someKeeperTransMeta.setClusterId(someCluster);
-        someKeeperTransMeta.setShardId(someShard);
+        someKeeperTransMeta.setReplId(someReplId.id());
         someKeeperTransMeta.setKeeperMeta(someKeeperMeta);
 
         when(keeperContainerConfig.getReplicationStoreDir()).thenReturn(System.getProperty("user.dir"));
+        when(keeperContainerConfig.keeperLeaderResetMinInterval()).thenReturn(10);
+        when(containerResourceManager.isPortFree(anyInt())).thenReturn(true);
+        when(containerResourceManager.applyPort(anyInt())).thenReturn(true);
 
         ReflectionTestUtils.setField(ComponentRegistryHolder.class, "componentRegistry", componentRegistry);
     }
@@ -79,8 +91,7 @@ public class KeeperContainerServiceTest {
         RedisKeeperServer redisKeeperServer = keeperContainerService.add(someKeeperTransMeta);
 
         verify(componentRegistry, times(1)).add(redisKeeperServer);
-        assertEquals(someCluster, redisKeeperServer.getClusterId());
-        assertEquals(someShard, redisKeeperServer.getShardId());
+        assertEquals(someReplId, redisKeeperServer.getReplId());
         assertEquals(somePort, redisKeeperServer.getListeningPort());
     }
 
@@ -92,16 +103,14 @@ public class KeeperContainerServiceTest {
 
     @Test(expected = RedisKeeperRuntimeException.class)
     public void testAddKeeperWithSamePortMultipleTimes() throws Exception {
-        String anotherShard = "anotherShard";
-
         KeeperMeta anotherKeeperMeta = new KeeperMeta();
         anotherKeeperMeta.setPort(somePort);
         KeeperTransMeta anotherKeeperTransMeta = new KeeperTransMeta();
         anotherKeeperTransMeta.setKeeperMeta(anotherKeeperMeta);
-        anotherKeeperTransMeta.setClusterId(someCluster);
-        anotherKeeperTransMeta.setShardId(anotherShard);
+        anotherKeeperTransMeta.setClusterDbId(someClusterId.id());
 
         keeperContainerService.add(someKeeperTransMeta);
+        when(containerResourceManager.applyPort(somePort)).thenReturn(false);
         keeperContainerService.add(anotherKeeperTransMeta);
     }
 
@@ -118,6 +127,30 @@ public class KeeperContainerServiceTest {
         }
 
         assertEquals(someException, cause);
+    }
+
+    @Test
+    public void testContainerUnhealthy_ResetKeeperLeader() {
+        keeperContainerService.setRedisKeeperServers(Collections.singletonMap("test", redisKeeperServer));
+        when(redisKeeperServer.isLeader()).thenReturn(false);
+        keeperContainerService.update(HealthState.DOWN, null);
+        verify(redisKeeperServer, never()).resetElection();
+
+        when(redisKeeperServer.isLeader()).thenReturn(true);
+        when(redisKeeperServer.getLastElectionResetTime()).thenReturn(System.currentTimeMillis()/1000);
+        keeperContainerService.update(HealthState.DOWN, null);
+        verify(redisKeeperServer, never()).resetElection();
+
+
+        when(redisKeeperServer.isLeader()).thenReturn(true);
+        when(redisKeeperServer.getLastElectionResetTime()).thenReturn(0L);
+        keeperContainerService.update(HealthState.HEALTHY, null);
+        verify(redisKeeperServer, never()).resetElection();
+
+        when(redisKeeperServer.isLeader()).thenReturn(true);
+        when(redisKeeperServer.getLastElectionResetTime()).thenReturn(0L);
+        keeperContainerService.update(HealthState.DOWN, null);
+        verify(redisKeeperServer, times(1)).resetElection();
     }
 
 }

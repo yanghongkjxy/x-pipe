@@ -7,8 +7,10 @@ import com.ctrip.xpipe.api.endpoint.Endpoint;
  * <p>
  * May 15, 2018
  */
-public interface EndpointHealthChecker {
+public interface EndpointHealthChecker<T extends Endpoint> {
 
-    boolean checkConnectivity(Endpoint endpoint);
+    boolean checkConnectivity(T endpoint);
+
+    boolean resetIfNeed(T endpoint);
 
 }

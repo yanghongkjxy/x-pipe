@@ -16,9 +16,10 @@ public class ShardModel implements java.io.Serializable{
 	
 	private List<RedisTbl> m_keepers = new ArrayList<RedisTbl>();
 	private List<RedisTbl> m_redises = new ArrayList<RedisTbl>();
+	private List<ApplierTbl> m_appliers = new ArrayList<ApplierTbl>();
 	
 	/** for creation **/
-	private Map<Long, SetinelTbl> sentinels;
+	private Map<Long, SentinelGroupModel> sentinels;
 	
 	public ShardModel(){
 	}
@@ -37,6 +38,25 @@ public class ShardModel implements java.io.Serializable{
 		m_redises.add(redis);
 		return this;
 	}
+
+	public ShardModel addApplier(ApplierTbl applier) {
+		m_appliers.add(applier);
+		return this;
+	}
+
+	public ShardModel setKeepers(List<RedisTbl> keepers) {
+		this.m_keepers = keepers;
+		return this;
+	}
+
+	public ShardModel setAppliers(List<ApplierTbl> appliers) {
+		this.m_appliers = appliers;
+		return this;
+	}
+
+	public List<ApplierTbl> getAppliers() {
+		return m_appliers;
+	}
 	
 	public List<RedisTbl> getKeepers() {
 		return m_keepers;
@@ -54,16 +74,16 @@ public class ShardModel implements java.io.Serializable{
 		this.shardTbl = shardTbl;
 	}
 	
-	public Map<Long, SetinelTbl> getSentinels() {
+	public Map<Long, SentinelGroupModel> getSentinels() {
 		return this.sentinels;
 	}
 	
-	public void setSentinels(Map<Long, SetinelTbl> sentinels) {
+	public void setSentinels(Map<Long, SentinelGroupModel> sentinels) {
 		this.sentinels = sentinels;
 	}
 
 	@Override
 	public String toString() {
-		return String.format("shard:%s, keepers:%s, redises:%s", shardTbl, m_keepers, m_redises);
+		return String.format("shard:%s, keepers:%s, redises:%s, appliers:%s", shardTbl, m_keepers, m_redises, m_appliers);
 	}
 }

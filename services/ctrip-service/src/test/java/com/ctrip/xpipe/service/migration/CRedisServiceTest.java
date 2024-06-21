@@ -1,6 +1,6 @@
 package com.ctrip.xpipe.service.migration;
 
-import com.ctrip.xpipe.AbstractServiceTest;
+import com.ctrip.xpipe.service.AbstractServiceTest;
 import com.ctrip.xpipe.api.migration.OuterClientService;
 import com.ctrip.xpipe.api.migration.OuterClientService.MigrationPublishResult;
 import com.ctrip.xpipe.codec.JsonCodec;
@@ -32,6 +32,13 @@ public class CRedisServiceTest extends AbstractServiceTest {
 		logger.info("{}", outerClientService.getClusterInfo("Members.OfflineLogin"));
 		logger.info("{}", jsonCodec.encode(outerClientService.getClusterInfo("cluster_shyin_1")));
 
+	}
+
+	@Test
+	public void testExcludeIdcs() throws Exception {
+
+		logger.info("{}", outerClientService.excludeIdcs("test_aula", new String[]{"shaxy"}));
+		logger.info("{}", outerClientService.excludeIdcs("SingleDCHasMultiDcInstancesCluster", new String[]{}));
 	}
 
 	@Test(expected =  IllegalStateException.class)

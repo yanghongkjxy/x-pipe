@@ -36,20 +36,19 @@ public class ReplicationStoreMeta implements Serializable{
 	private Long rdbLastOffset;
 	private long rdbFileSize;
 	private String rdbEofMark;
+	private String rdbGtidSet;
+
+	private String rordbFile;
+	private Long rordbLastOffset;
+	private long rordbFileSize;
+	private String rordbEofMark;
+	private String rordbGtidSet;
 	
 	// last offset of rdb in keeper coordinate
 	private String cmdFilePrefix;
 
 	private KeeperState keeperState;
 	private String keeperRunid;
-
-
-	//these fieled are to be deleted after upgrade to new version
-	@Deprecated
-	private Long rdbLastKeeperOffset;
-	@Deprecated
-	private Long keeperBeginOffset;
-	
 
 	public ReplicationStoreMeta() {
 
@@ -65,9 +64,15 @@ public class ReplicationStoreMeta implements Serializable{
 		
 		this.rdbFile = proto.rdbFile;
 		this.rdbLastOffset = proto.rdbLastOffset;
-		
 		this.rdbFileSize = proto.rdbFileSize;
 		this.rdbEofMark = proto.rdbEofMark;
+		this.rdbGtidSet = proto.rdbGtidSet;
+
+		this.rordbFile = proto.rordbFile;
+		this.rordbLastOffset = proto.rordbLastOffset;
+		this.rordbFileSize = proto.rordbFileSize;
+		this.rordbEofMark = proto.rordbEofMark;
+		this.rordbGtidSet = proto.rordbGtidSet;
 		
 		this.cmdFilePrefix = proto.cmdFilePrefix;
 		this.keeperState = proto.keeperState;
@@ -80,6 +85,14 @@ public class ReplicationStoreMeta implements Serializable{
 	
 	public String getRdbEofMark() {
 		return rdbEofMark;
+	}
+
+	public String getRdbGtidSet() {
+		return rdbGtidSet;
+	}
+
+	public void setRdbGtidSet(String rdbGtidSet) {
+		this.rdbGtidSet = rdbGtidSet;
 	}
 
 	public void setRdbFileSize(long rdbFileSize) {
@@ -112,7 +125,6 @@ public class ReplicationStoreMeta implements Serializable{
 
 	public void setBeginOffset(Long beginOffset) {
 		this.beginOffset = beginOffset;
-		ajastRdbLastOffset();
 	}
 
 
@@ -170,44 +182,74 @@ public class ReplicationStoreMeta implements Serializable{
 	public void setKeeperState(KeeperState keeperState) {
 		this.keeperState = keeperState;
 	}
-	
-	@Deprecated
-	public void setMasterRunid(String masterRunid) {
-		this.replId = masterRunid;
+
+	public String getRordbFile() {
+		return rordbFile;
 	}
 
-	@Deprecated
-	public void setRdbLastKeeperOffset(Long rdbLastKeeperOffset) {
-		this.rdbLastKeeperOffset = rdbLastKeeperOffset;
-		ajastRdbLastOffset();
-	}
-	
-	@Deprecated
-	public void setKeeperBeginOffset(Long keeperBeginOffset) {
-		this.keeperBeginOffset = keeperBeginOffset;
-		ajastRdbLastOffset();
+	public void setRordbFile(String rordbFile) {
+		this.rordbFile = rordbFile;
 	}
 
-	private void ajastRdbLastOffset() {
-		
-		if(rdbLastKeeperOffset != null && keeperBeginOffset != null && beginOffset != null ){
-			this.rdbLastOffset = beginOffset + (rdbLastKeeperOffset - keeperBeginOffset);
-			logger.info("[ajastRdbLastOffset]begin:{}, keeperBegin:{}, rdbLastKeeper:{} ===> rdbLast:{}", beginOffset, keeperBeginOffset, rdbLastKeeperOffset, rdbLastOffset);
-		}
+	public Long getRordbLastOffset() {
+		return rordbLastOffset;
+	}
+
+	public void setRordbLastOffset(Long rordbLastOffset) {
+		this.rordbLastOffset = rordbLastOffset;
+	}
+
+	public long getRordbFileSize() {
+		return rordbFileSize;
+	}
+
+	public void setRordbFileSize(long rordbFileSize) {
+		this.rordbFileSize = rordbFileSize;
+	}
+
+	public String getRordbEofMark() {
+		return rordbEofMark;
+	}
+
+	public void setRordbEofMark(String rordbEofMark) {
+		this.rordbEofMark = rordbEofMark;
+	}
+
+	public String getRordbGtidSet() {
+		return rordbGtidSet;
+	}
+
+	public void setRordbGtidSet(String rordbGtidSet) {
+		this.rordbGtidSet = rordbGtidSet;
 	}
 
 	@Override
 	public String toString() {
-		return "ReplicationStoreMeta [masterAddress=" + masterAddress + ", beginOffset=" + beginOffset 
-				+ ", replid=" + replId + ",replid2=" + replId2 + ", secondReplIdOffset=" + secondReplIdOffset  
-				+ ", rdbFile=" + rdbFile + ", rdbLastOffset=" + rdbLastOffset + ", rdbFileSize=" + rdbFileSize + ", "+ ", rdbFileEofMark:" + rdbEofMark + 
-				", cmdFilePrefix=" + cmdFilePrefix + 
-				", keeperState=" + keeperState +", keeperRunid=" + keeperRunid;
+		return "ReplicationStoreMeta{" +
+				"masterAddress=" + masterAddress +
+				", beginOffset=" + beginOffset +
+				", replId='" + replId + '\'' +
+				", replId2='" + replId2 + '\'' +
+				", secondReplIdOffset=" + secondReplIdOffset +
+				", rdbFile='" + rdbFile + '\'' +
+				", rdbLastOffset=" + rdbLastOffset +
+				", rdbFileSize=" + rdbFileSize +
+				", rdbEofMark='" + rdbEofMark + '\'' +
+				", rdbGtidSet='" + rdbGtidSet + '\'' +
+				", rordbFile='" + rordbFile + '\'' +
+				", rordbLastOffset=" + rordbLastOffset +
+				", rordbFileSize=" + rordbFileSize +
+				", rordbEofMark='" + rordbEofMark + '\'' +
+				", rordbGtidSet='" + rordbGtidSet + '\'' +
+				", cmdFilePrefix='" + cmdFilePrefix + '\'' +
+				", keeperState=" + keeperState +
+				", keeperRunid='" + keeperRunid + '\'' +
+				'}';
 	}
 
 	@Override
 	public boolean equals(Object obj) {
-		return EqualsBuilder.reflectionEquals(this, obj, "rdbLastKeeperOffset", "keeperBeginOffset");
+		return EqualsBuilder.reflectionEquals(this, obj);
 	}
 	
 	@Override

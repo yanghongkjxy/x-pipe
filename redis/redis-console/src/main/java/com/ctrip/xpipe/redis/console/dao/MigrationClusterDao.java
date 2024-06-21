@@ -13,6 +13,7 @@ import org.unidal.lookup.ContainerLoader;
 import javax.annotation.PostConstruct;
 import java.util.Date;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author wenchao.meng
@@ -29,6 +30,106 @@ public class MigrationClusterDao extends AbstractXpipeConsoleDAO{
     public void postConstruct() throws ComponentLookupException {
 
         migrationClusterTblDao = ContainerLoader.getDefaultContainer().lookup(MigrationClusterTblDao.class);
+    }
+
+    public List<MigrationClusterTbl> find(long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClusters(
+                        size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByCluster(long clusterId, long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByCluster(
+                        clusterId, size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByOperator(String operator, long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByOperator(
+                        operator, size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByStatus(String status, long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByStatus(
+                        status, size, offset, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findAllEventsWithoutTestCluster(long size, long offset) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationEventsWithoutTestCluster(
+                        size, offset, MigrationClusterTblEntity.READSET_MIG_EVENT_ID);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findByMigEventIds(List<Long> migEventIds) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByMigEvents(
+                        migEventIds, MigrationClusterTblEntity.READSET_EVENT_WITH_CLUSTER);
+            }
+        });
+    }
+
+    public long countAllByCluster(long clusterId) {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao.countAllByCluster(
+                        clusterId, MigrationClusterTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
+    public long countAllByOperator(String operator) {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao.countAllByOperator(
+                        operator, MigrationClusterTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
+    public long countAllByStatus(String status) {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao.countAllByStatus(
+                        status, MigrationClusterTblEntity.READSET_COUNT).getCount();
+            }
+        });
+    }
+
+    public long countAllEventsWithoutTestClusters() {
+        return queryHandler.handleQuery(new DalQuery<Long>() {
+            @Override
+            public Long doQuery() throws DalException {
+                return migrationClusterTblDao
+                        .countEventsWithoutTestCluster(MigrationClusterTblEntity.READSET_MIG_EVENT_CNT).getMigEventCnt();
+            }
+        });
     }
 
     public List<MigrationClusterTbl> findUnfinishedByClusterId(final long clusterId){
@@ -140,6 +241,34 @@ public class MigrationClusterDao extends AbstractXpipeConsoleDAO{
             @Override
             public MigrationClusterTbl doQuery() throws DalException {
                 return migrationClusterTblDao.findByPK(id, MigrationClusterTblEntity.READSET_FULL);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findLatestMigrationClusters(Date date) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findLatestMigrationClusters(date, MigrationClusterTblEntity.READSET_FULL);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findLatestMigrationClusterWithClusterName(Date date) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findLatestMigrationClustersWithClusterName(date, MigrationClusterTblEntity.READSET_FULL_WITH_CLUSTER_NAME);
+            }
+        });
+    }
+
+    public List<MigrationClusterTbl> findMigrationClustersByNameAndTime(Set<String> clusters, Date from, Date to) {
+        return queryHandler.handleQuery(new DalQuery<List<MigrationClusterTbl>>() {
+            @Override
+            public List<MigrationClusterTbl> doQuery() throws DalException {
+                return migrationClusterTblDao.findMigrationClustersByNameAndTime(clusters, from, to,
+                        MigrationClusterTblEntity.READSET_MIGRATION_CLUSTER_STATUS);
             }
         });
     }

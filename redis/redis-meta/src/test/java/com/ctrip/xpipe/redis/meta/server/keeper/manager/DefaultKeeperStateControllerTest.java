@@ -12,10 +12,12 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * @author wenchao.meng
@@ -26,13 +28,17 @@ import java.util.concurrent.TimeoutException;
 public class DefaultKeeperStateControllerTest extends AbstractMetaServerTest{
 	
 	private DefaultKeeperStateController defaultKeeperStateController;
+
+	private int sleepInterval = 0;
+
+	private Supplier<Command<?>> addCommandSupplier;
 	
-	private TestCommand addCommand = new TestCommand("success", 0);
+	private TestCommand addCommand = new TestCommand("success", sleepInterval);
 	
 	@Mock
 	private KeeperContainerService keeperContainerService; 
 
-	private TestCommand deleteCommand = new TestCommand("success", 0);
+	private TestCommand deleteCommand = new TestCommand("success", sleepInterval);
 
 	@Before
 	public void beforeDefaultKeeperStateControllerTest() throws Exception{
@@ -42,7 +48,7 @@ public class DefaultKeeperStateControllerTest extends AbstractMetaServerTest{
 			protected Command<?> createAddKeeperCommand(KeeperContainerService keeperContainerService,
 					KeeperTransMeta keeperTransMeta, ScheduledExecutorService scheduled,
 					int addKeeperSuccessTimeoutMilli) {
-				return addCommand;
+				return addCommandSupplier.get();
 			}
 			
 			@Override
@@ -71,10 +77,15 @@ public class DefaultKeeperStateControllerTest extends AbstractMetaServerTest{
 	
 	@Test
 	public void testAdd(){
-		
+		addCommandSupplier = new Supplier<Command<?>>() {
+			@Override
+			public Command<?> get() {
+				return addCommand;
+			}
+		};
 		Assert.assertFalse(addCommand.isBeginExecute());
 		
-		defaultKeeperStateController.addKeeper(new KeeperTransMeta(getClusterId(), getShardId(), new KeeperMeta()));
+		defaultKeeperStateController.addKeeper(new KeeperTransMeta(getClusterDbId(), getShardDbId(), new KeeperMeta()));
 		sleep(50);
 		Assert.assertTrue(addCommand.isBeginExecute());
 		
@@ -84,8 +95,42 @@ public class DefaultKeeperStateControllerTest extends AbstractMetaServerTest{
 	public void testDelete() throws TimeoutException {
 	
 		Assert.assertFalse(deleteCommand.isBeginExecute());
-		defaultKeeperStateController.removeKeeper(new KeeperTransMeta(getClusterId(), getShardId(), new KeeperMeta()));
+		defaultKeeperStateController.removeKeeper(new KeeperTransMeta(getClusterDbId(), getShardDbId(), new KeeperMeta()));
 		waitConditionUntilTimeOut(() -> deleteCommand.isBeginExecute(), 1000);
+	}
+
+	@Test
+	public void testSequentialExecInsideShard() throws Exception {
+		AtomicInteger counter = new AtomicInteger();
+		addCommandSupplier = new Supplier<Command<?>>() {
+			@Override
+			public Command<?> get() {
+				return new CountingCommand(counter, 100);
+			}
+		};
+		int tasks = 100;
+		for(int i = 0; i < tasks; i++) {
+			defaultKeeperStateController.addKeeper(new KeeperTransMeta(getClusterDbId(), getShardDbId(), new KeeperMeta()));
+		}
+		sleep(250);
+		Assert.assertTrue(counter.get() < tasks && counter.get() > 0);
+	}
+
+	@Test
+	public void testSequentialExecBetweenShards() throws Exception {
+		AtomicInteger counter = new AtomicInteger();
+		addCommandSupplier = new Supplier<Command<?>>() {
+			@Override
+			public Command<?> get() {
+				return new CountingCommand(counter, 100);
+			}
+		};
+		int tasks = 100;
+		for(int i = 0; i < tasks; i++) {
+			defaultKeeperStateController.addKeeper(new KeeperTransMeta(getClusterDbId(), Math.abs(randomLong()), new KeeperMeta()));
+		}
+		sleep(250);
+		Assert.assertEquals(counter.get(), tasks);
 	}
 
 }

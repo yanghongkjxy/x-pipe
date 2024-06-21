@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.console.migration;
 
+import com.ctrip.xpipe.api.migration.OuterClientException;
 import com.ctrip.xpipe.migration.AbstractOuterClientService;
 import com.ctrip.xpipe.redis.console.migration.command.MigrationCommandBuilder;
 import com.ctrip.xpipe.redis.console.migration.model.*;
@@ -66,7 +67,7 @@ public class MultiShardMigrationTest extends AbstractMigrationTest {
 		createShards();
 
 		MigrationClusterTbl migrationClusterTbl = migrationService.findMigrationCluster(1L, clusterId);
-		migrationCluster = new DefaultMigrationCluster(executors, scheduled, migrationEvent, migrationClusterTbl, dcService, clusterService, shardService, redisService, migrationService);
+		migrationCluster = new DefaultMigrationCluster(executors, scheduled, migrationEvent, migrationClusterTbl, null, null, dcService, clusterService, shardService, redisService, migrationService);
 
 		for(int cnt = 1 ; cnt != TEST_SHARD_CNT + 1; ++cnt) {
 
@@ -146,6 +147,11 @@ public class MultiShardMigrationTest extends AbstractMigrationTest {
 			public ClusterInfo getClusterInfo(String clusterName) throws Exception {
 				return null;
 			}
+
+			@Override
+			public DcMeta getOutClientDcMeta(String dc) throws Exception {
+				return null;
+			}
 		});
 
 		ClusterTbl originalCluster = clusterService.find(clusterId);
@@ -159,11 +165,22 @@ public class MultiShardMigrationTest extends AbstractMigrationTest {
 
 
 		((DefaultMigrationCluster)migrationCluster).setOuterClientService(new AbstractOuterClientService() {
+
+			@Override
+			public DcMeta getOutClientDcMeta(String dc) throws Exception {
+				return null;
+			}
+
 			@Override
 			public ClusterInfo getClusterInfo(String clusterName) throws Exception {
 				ClusterInfo clusterInfo = new ClusterInfo();
 				clusterInfo.setGroups(Lists.newArrayList(new GroupInfo()));
 				return clusterInfo;
+			}
+
+			@Override
+			public boolean clusterMigratePreCheck(String clusterName) throws OuterClientException {
+				return true;
 			}
 		});
 		//again
@@ -175,7 +192,7 @@ public class MultiShardMigrationTest extends AbstractMigrationTest {
 	}
 
 
-		@Test
+	@Test
 	@DirtiesContext
 	public void testOneFailedOnChecking() {
 
@@ -279,7 +296,7 @@ public class MultiShardMigrationTest extends AbstractMigrationTest {
 		ClusterTbl currentCluster = clusterService.find(clusterId);
 		Assert.assertEquals(ClusterStatus.Migrating.toString(), currentCluster.getStatus());
 		Assert.assertEquals(1, currentCluster.getActivedcId());
-		Assert.assertEquals(MigrationStatus.PartialSuccess.toString(), migrationCluster.getStatus().toString());
+		Assert.assertEquals(MigrationStatus.PartialRetryFail.toString(), migrationCluster.getStatus().toString());
 		for(MigrationShard migrationShard : migrationCluster.getMigrationShards()) {
 			if(migrationShard.getCurrentShard().getId() == failPos) {
 				Assert.assertEquals(ShardMigrationResultStatus.FAIL,migrationShard.getShardMigrationResult().getStatus());
@@ -298,7 +315,7 @@ public class MultiShardMigrationTest extends AbstractMigrationTest {
 			Assert.assertNull(migrationShard.getShardMigrationResult().getSteps().get(ShardMigrationStep.MIGRATE_OTHER_DC));
 			Assert.assertFalse(migrationShard.getShardMigrationResult().stepSuccess(ShardMigrationStep.MIGRATE));
 		}
-		Assert.assertEquals(MigrationStatus.PartialSuccess, migrationCluster.getStatus());
+		Assert.assertEquals(MigrationStatus.PartialRetryFail, migrationCluster.getStatus());
 
 
 		logger.info("[testOneFailedOnMigration][retry success]");

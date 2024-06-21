@@ -4,12 +4,13 @@ import com.ctrip.xpipe.api.command.Command;
 import com.ctrip.xpipe.api.command.CommandFuture;
 import com.ctrip.xpipe.api.command.CommandFutureListener;
 import com.ctrip.xpipe.api.migration.OuterClientService;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.command.SequenceCommandChain;
 import com.ctrip.xpipe.endpoint.HostPort;
-import com.ctrip.xpipe.redis.console.alert.ALERT_TYPE;
-import com.ctrip.xpipe.redis.console.alert.AlertManager;
-import com.ctrip.xpipe.redis.console.controller.api.RetMessage;
-import com.ctrip.xpipe.redis.console.healthcheck.nonredis.AbstractSiteLeaderIntervalCheck;
+import com.ctrip.xpipe.redis.checker.alert.ALERT_TYPE;
+import com.ctrip.xpipe.redis.checker.alert.AlertManager;
+import com.ctrip.xpipe.redis.checker.controller.result.RetMessage;
+import com.ctrip.xpipe.redis.console.AbstractSiteLeaderIntervalAction;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
 import com.ctrip.xpipe.redis.console.service.migration.CheckMigrationCommandBuilder;
@@ -23,14 +24,14 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import javax.annotation.PostConstruct;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Component
 @Profile(AbstractProfile.PROFILE_NAME_PRODUCTION)
-public class DefaultMigrationSystemAvailableChecker extends AbstractSiteLeaderIntervalCheck implements MigrationSystemAvailableChecker {
+public class DefaultMigrationSystemAvailableChecker extends AbstractSiteLeaderIntervalAction implements MigrationSystemAvailableChecker {
 
     private static final long checkIntervalMill = Long.parseLong(System.getProperty("console.migrate.system.check.interval", "30000"));
 
@@ -57,7 +58,7 @@ public class DefaultMigrationSystemAvailableChecker extends AbstractSiteLeaderIn
             = new AtomicReference<>(MigrationSystemAvailableChecker.MigrationSystemAvailability.createAvailableResponse());
 
     @Override
-    protected void doCheck() {
+    protected void doAction() {
         if(builder == null) {
             synchronized (this) {
                 if(builder == null) {
@@ -69,18 +70,28 @@ public class DefaultMigrationSystemAvailableChecker extends AbstractSiteLeaderIn
                 }
             }
         }
-        result.getAndSet(MigrationSystemAvailability.createAvailableResponse());
+
+        MigrationSystemAvailability systemAvailability = MigrationSystemAvailability.createAvailableResponse();
 
         SequenceCommandChain chain = new SequenceCommandChain(true);
-        chain.add(checkDatabase());
-        chain.add(checkOuterClient());
-        chain.add(checkMetaServer());
+        chain.add(checkDatabase(systemAvailability));
+        chain.add(checkOuterClient(systemAvailability));
+        chain.add(checkMetaServer(systemAvailability));
         chain.execute().addListener(new CommandFutureListener<Object>() {
             @Override
             public void operationComplete(CommandFuture<Object> commandFuture) throws Exception {
+                updateCheckResult(systemAvailability);
                 checkIfCheckCommandDelay();
             }
         });
+    }
+
+    private void updateCheckResult(MigrationSystemAvailability newResult) {
+        synchronized (result) {
+            if (null == result.get() || result.get().getTimestamp() < newResult.getTimestamp()) {
+                result.set(newResult);
+            }
+        }
     }
 
     @Override
@@ -98,39 +109,53 @@ public class DefaultMigrationSystemAvailableChecker extends AbstractSiteLeaderIn
         return result.get();
     }
 
-    private Command<RetMessage> checkDatabase() {
-        Command<RetMessage> command = builder.checkCommand(CHECK_MIGRATION_SYSTEM_STEP.CHECK_DATA_BASE);
-        checkCommandFuture("Database:", command, lastTimeCheckDatabase);
+    private Command<CheckResult> checkDatabase(MigrationSystemAvailability systemAvailability) {
+        Command<CheckResult> command = builder.checkCommand(CHECK_MIGRATION_SYSTEM_STEP.CHECK_DATA_BASE);
+        checkCommandFuture("Database", command, systemAvailability, lastTimeCheckDatabase);
         return command;
     }
 
-    private Command<RetMessage> checkOuterClient() {
-        Command<RetMessage> command = builder.checkCommand(CHECK_MIGRATION_SYSTEM_STEP.CHECK_OUTER_CLIENT);
-        checkCommandFuture("OuterClient:", command, lastTimeCheckOuterClient);
+    private Command<CheckResult> checkOuterClient(MigrationSystemAvailability systemAvailability) {
+        Command<CheckResult> command = builder.checkCommand(CHECK_MIGRATION_SYSTEM_STEP.CHECK_OUTER_CLIENT);
+        checkCommandFuture("OuterClient", command, systemAvailability, lastTimeCheckOuterClient);
         return command;
     }
 
-    private Command<RetMessage> checkMetaServer() {
-        Command<RetMessage> command = builder.checkCommand(CHECK_MIGRATION_SYSTEM_STEP.CHECK_METASERVER);
-        checkCommandFuture("MetaServer:", command, lastTimeCheckMetaServer);
+    private Command<CheckResult> checkMetaServer(MigrationSystemAvailability systemAvailability) {
+        Command<CheckResult> command = builder.checkCommand(CHECK_MIGRATION_SYSTEM_STEP.CHECK_METASERVER);
+        checkCommandFuture("MetaServer", command, systemAvailability, lastTimeCheckMetaServer);
         return command;
     }
 
-    private void checkCommandFuture(final String title, final Command<RetMessage> command, AtomicLong timestamp) {
-        command.future().addListener(new CommandFutureListener<RetMessage>() {
+    private void checkCommandFuture(final String title, final Command<CheckResult> command,
+                                    MigrationSystemAvailability systemAvailability, AtomicLong timestamp) {
+        command.future().addListener(new CommandFutureListener<CheckResult>() {
             @Override
-            public void operationComplete(CommandFuture<RetMessage> commandFuture) {
+            public void operationComplete(CommandFuture<CheckResult> commandFuture) {
                 timestamp.set(System.currentTimeMillis());
                 if(!commandFuture.isSuccess()) {
-                    getResult().addErrorMessage(title, commandFuture.cause());
+                    warnOrError(title, commandFuture.cause(), systemAvailability);
                 } else {
-                    RetMessage retMessage = commandFuture.getNow();
-                    if(retMessage.getState() != RetMessage.SUCCESS_STATE) {
-                        getResult().addErrorMessage(title, retMessage.getMessage());
+                    CheckResult checkResult = commandFuture.getNow();
+                    systemAvailability.addCheckResult(title, checkResult);
+                    if(checkResult.getState() != RetMessage.SUCCESS_STATE) {
+                        warnOrError(title, checkResult, systemAvailability);
                     }
                 }
             }
         });
+    }
+
+    private void warnOrError(final String title, final RetMessage message, MigrationSystemAvailability systemAvailability) {
+        if(message.getState() == RetMessage.FAIL_STATE) {
+            systemAvailability.addErrorMessage(title, message.getMessage());
+        } else {
+            systemAvailability.addWarningMessage(String.format("%s:%s", title, message.getMessage()));
+        }
+    }
+
+    private void warnOrError(final String title, final Throwable throwable, MigrationSystemAvailability systemAvailability) {
+        systemAvailability.addErrorMessage(title, throwable);
     }
 
     private void checkIfCheckCommandDelay() {
@@ -158,5 +183,14 @@ public class DefaultMigrationSystemAvailableChecker extends AbstractSiteLeaderIn
     @VisibleForTesting
     protected CheckMigrationCommandBuilder getBuilder() {
         return builder;
+    }
+
+    @Override
+    protected boolean shouldDoAction() {
+        if (!super.shouldDoAction()) return false;
+
+        // only check migration system when the cluster in manage can migrate
+        Set<String> ownTypes =  consoleConfig.getOwnClusterType();
+        return null != ownTypes && ownTypes.stream().anyMatch(type -> ClusterType.lookup(type).supportMigration());
     }
 }

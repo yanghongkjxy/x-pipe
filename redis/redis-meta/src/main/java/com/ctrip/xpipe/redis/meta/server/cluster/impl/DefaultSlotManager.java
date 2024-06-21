@@ -10,6 +10,7 @@ import com.ctrip.xpipe.redis.meta.server.cluster.SLOT_STATE;
 import com.ctrip.xpipe.redis.meta.server.cluster.SlotInfo;
 import com.ctrip.xpipe.redis.meta.server.cluster.SlotManager;
 import com.ctrip.xpipe.redis.meta.server.config.MetaServerConfig;
+import com.ctrip.xpipe.redis.meta.server.meta.DcMetaCache;
 import com.ctrip.xpipe.utils.MapUtils;
 import com.ctrip.xpipe.utils.XpipeThreadFactory;
 import com.ctrip.xpipe.zk.ZkClient;
@@ -32,13 +33,15 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 @Component
 public class DefaultSlotManager extends AbstractLifecycle implements SlotManager, TopElement{
-	
 
 	@Autowired
 	private ZkClient zkClient;
 	
 	@Autowired
 	private MetaServerConfig config;
+
+	@Autowired
+	private DcMetaCache dcMetaCache;
 	
 	private ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 	
@@ -373,6 +376,5 @@ public class DefaultSlotManager extends AbstractLifecycle implements SlotManager
 			lock.readLock().unlock();
 		}
 	}
-
 
 }

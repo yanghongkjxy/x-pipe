@@ -4,7 +4,7 @@ import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.netty.ByteBufUtils;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.payload.ByteArrayOutputStreamPayload;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser;
+import com.ctrip.xpipe.redis.core.protocal.protocal.RdbBulkStringParser;
 import com.ctrip.xpipe.tuple.Pair;
 import io.netty.buffer.ByteBuf;
 
@@ -49,13 +49,13 @@ public class InMemoryPsync extends AbstractPsync{
 	}
 
 	@Override
-	protected BulkStringParser createRdbReader() {
-		return new BulkStringParser(rdb);
+	protected RdbBulkStringParser createRdbReader() {
+		return new RdbBulkStringParser(rdb);
 	}
 	
 	@Override
 	protected void failReadRdb(Throwable throwable) {
-		logger.error("[failReadRdb]", throwable);
+		getLogger().error("[failReadRdb]", throwable);
 	}
 
 	public byte[] getCommands() {

@@ -2,19 +2,19 @@ package com.ctrip.xpipe.redis.console.migration.model.impl;
 
 import com.ctrip.xpipe.api.migration.OuterClientService;
 import com.ctrip.xpipe.api.observer.Observable;
-import com.ctrip.xpipe.api.retry.RetryTemplate;
-import com.ctrip.xpipe.command.AbstractCommand;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.observer.AbstractObservable;
 import com.ctrip.xpipe.redis.console.annotation.DalTransaction;
-import com.ctrip.xpipe.redis.console.exception.ServerException;
-import com.ctrip.xpipe.redis.console.job.retry.RetryCondition;
-import com.ctrip.xpipe.redis.console.job.retry.RetryNTimesOnCondition;
+import com.ctrip.xpipe.redis.console.cache.AzGroupCache;
+import com.ctrip.xpipe.redis.console.entity.AzGroupClusterEntity;
 import com.ctrip.xpipe.redis.console.migration.model.*;
 import com.ctrip.xpipe.redis.console.migration.status.*;
+import com.ctrip.xpipe.redis.console.model.AzGroupModel;
 import com.ctrip.xpipe.redis.console.model.ClusterTbl;
 import com.ctrip.xpipe.redis.console.model.DcTbl;
 import com.ctrip.xpipe.redis.console.model.MigrationClusterTbl;
 import com.ctrip.xpipe.redis.console.model.ShardTbl;
+import com.ctrip.xpipe.redis.console.repository.AzGroupClusterRepository;
 import com.ctrip.xpipe.redis.console.service.ClusterService;
 import com.ctrip.xpipe.redis.console.service.DcService;
 import com.ctrip.xpipe.redis.console.service.RedisService;
@@ -25,7 +25,6 @@ import com.ctrip.xpipe.utils.VisibleForTesting;
 import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeoutException;
 
 /**
  * @author shyin
@@ -46,6 +45,8 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
 
     private ClusterService clusterService;
     private ShardService shardService;
+    private AzGroupClusterRepository azGroupClusterRepository;
+    private AzGroupCache azGroupCache;
     private DcService dcService;
     private RedisService redisService;
     private MigrationService migrationService;
@@ -55,12 +56,16 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
 
     private OuterClientService outerClientService = OuterClientService.DEFAULT;
 
-    public DefaultMigrationCluster(Executor executors, ScheduledExecutorService scheduled, MigrationEvent event, MigrationClusterTbl migrationCluster, DcService dcService, ClusterService clusterService, ShardService shardService,
-                                   RedisService redisService, MigrationService migrationService) {
+    public DefaultMigrationCluster(Executor executors, ScheduledExecutorService scheduled, MigrationEvent event,
+        MigrationClusterTbl migrationCluster, AzGroupClusterRepository azGroupClusterRepository,
+        AzGroupCache azGroupCache, DcService dcService, ClusterService clusterService, ShardService shardService,
+        RedisService redisService, MigrationService migrationService) {
         this.event = event;
         this.migrationCluster = migrationCluster;
         this.clusterService = clusterService;
         this.shardService = shardService;
+        this.azGroupClusterRepository = azGroupClusterRepository;
+        this.azGroupCache = azGroupCache;
         this.dcService = dcService;
         this.redisService = redisService;
         this.migrationService = migrationService;
@@ -154,27 +159,9 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
 
         logger.info("[updateStat]{}-{}, {} -> {}",
                 migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus(), stat.getStatus());
-
-        this.currentState = stat;
-        try {
-            tryUpdateStartTime(stat.getStatus());
-            updateStorageClusterStatus();
-            updateStorageMigrationClusterStatus();
-        } catch (Exception e) {
-            logger.error("[updateStat] ", e);
-            throw new ServerException(e.getMessage());
-        }
-    }
-
-    private void tryUpdateStartTime(MigrationStatus migrationStatus) {
-        try{
-            if(MigrationStatus.updateStartTime(migrationStatus)){
-                logger.info("[tryUpdateStartTime][doUpdate]{}, {}, {}", migrationCluster.getId(), clusterName(), migrationStatus);
-                getMigrationService().updateMigrationClusterStartTime(migrationCluster.getId(), new Date());
-            }
-        }catch (Exception e){
-            logger.error("[tryUpdateStartTime]" + clusterName(), e);
-        }
+        this.currentState = stat; // update local state even if update db fail
+        this.getMigrationService().updateMigrationStatus(this, stat.getStatus());
+        this.currentState = stat; // avoid local state updating by other thread before real update db with row lock
     }
 
     @Override
@@ -189,6 +176,14 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
         ClusterTbl cluster = getCurrentCluster();
         cluster.setActivedcId(destDcId);
         clusterService.updateActivedcId(clusterId(), destDcId);
+
+        List<AzGroupClusterEntity> azGroupClusters = azGroupClusterRepository.selectByClusterId(cluster.getId());
+        for (AzGroupClusterEntity azGroupCluster : azGroupClusters) {
+            if (ClusterType.isSameClusterType(azGroupCluster.getAzGroupClusterType(), ClusterType.SINGLE_DC)) {
+                continue;
+            }
+            azGroupClusterRepository.updateActiveAzId(azGroupCluster.getId(), destDcId);
+        }
 
     }
 
@@ -243,59 +238,6 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
         this.outerClientService = outerClientService;
     }
 
-    private void updateStorageMigrationClusterStatus() {
-        MigrationStatus migrationStatus = this.currentState.getStatus();
-        getMigrationService().updateStatusAndEndTimeById(migrationCluster.getId(), migrationStatus, new Date());
-    }
-
-    @VisibleForTesting
-    protected void updateStorageClusterStatus() throws Exception {
-
-        MigrationStatus migrationStatus = this.currentState.getStatus();
-        ClusterStatus clusterStatus = migrationStatus.getClusterStatus();
-
-        logger.info("[updateStat][updatedb]{}, {}", clusterName(), clusterStatus);
-        RetryTemplate<String> retryTemplate = new RetryNTimesOnCondition<>(new RetryCondition.AbstractRetryCondition<String>() {
-            @Override
-            public boolean isSatisfied(String s) {
-                return ClusterStatus.isSameClusterStatus(s, clusterStatus);
-            }
-
-            @Override
-            public boolean isExceptionExpected(Throwable th) {
-                if(th instanceof TimeoutException)
-                    return true;
-                return false;
-            }
-        }, 3);
-        retryTemplate.execute(new AbstractCommand<String>() {
-            @Override
-            protected void doExecute() throws Exception {
-                try {
-                    getClusterService().updateStatusById(clusterId(), clusterStatus);
-                    ClusterTbl newCluster = getClusterService().find(clusterName());
-                    future().setSuccess(newCluster.getStatus());
-                } catch (Exception e) {
-                    future().setFailure(e.getCause());
-                }
-            }
-
-            @Override
-            protected void doReset() {
-
-            }
-
-            @Override
-            public String getName() {
-                return "update cluster status";
-            }
-        });
-
-        ClusterTbl newCluster = getClusterService().find(clusterName());
-        logger.info("[updateStat][getdb]{}, {}", clusterName(), newCluster != null ? newCluster.getStatus() : null);
-    }
-
-
     private long clusterId() {
         return getCurrentCluster().getId();
     }
@@ -318,18 +260,17 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
     }
 
     @Override
-    public void forcePublish() {
-        logger.info("[ForcePublish]{}-{}, {} -> ForcePublish", migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus());
-        if (!(currentState instanceof PartialSuccessState)) {
+    public void forceProcess() {
+        logger.info("[ForceProcess]{}-{}, {} -> ForceProcess", migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus());
+        if (!(currentState instanceof ForceProcessAbleState)) {
             throw new IllegalStateException(String.format("cannot cancel while %s", this.currentState.getStatus()));
         }
-        PartialSuccessState partialSuccessState = (PartialSuccessState) this.currentState;
-        partialSuccessState.forcePublish();
+        ForceProcessAbleState forceProcessAbleState = (ForceProcessAbleState) this.currentState;
+        forceProcessAbleState.updateAndForceProcess();
     }
 
     @Override
     public void forceEnd() {
-
         logger.info("[ForceEnd]{}-{}, {} -> ForceEnd", migrationCluster.getMigrationEventId(), clusterName(), this.currentState.getStatus());
         if (!(currentState instanceof PublishState)) {
             throw new IllegalStateException(String.format("Cannot force end while %s", this.currentState.getStatus()));
@@ -354,6 +295,11 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
     @Override
     public ShardService getShardService() {
         return shardService;
+    }
+
+    @Override
+    public AzGroupClusterRepository getAzGroupClusterRepository() {
+        return azGroupClusterRepository;
     }
 
     @Override
@@ -395,9 +341,24 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
 
     private Map<Long, DcTbl> generateDcMap(List<DcTbl> dcs) {
 
+        List<AzGroupClusterEntity> azGroupClusters =
+            getAzGroupClusterRepository().selectByClusterId(currentCluster.getId());
+        Map<String, ClusterType> clusterDcTypeMap = new HashMap<>();
+        for (AzGroupClusterEntity azGroupCluster : azGroupClusters) {
+            AzGroupModel azGroup = azGroupCache.getAzGroupById(azGroupCluster.getAzGroupId());
+            ClusterType azGroupType = ClusterType.lookup(azGroupCluster.getAzGroupClusterType());
+            for (String az : azGroup.getAzsAsList()) {
+                clusterDcTypeMap.put(az, azGroupType);
+            }
+        }
+
         Map<Long, DcTbl> result = new HashMap<>();
 
         for (DcTbl dc : dcs) {
+            ClusterType dcClusterType = clusterDcTypeMap.get(dc.getDcName());
+            if (dcClusterType != null && !dcClusterType.supportMigration()) {
+                continue;
+            }
             result.put(dc.getId(), dc);
         }
 
@@ -407,5 +368,15 @@ public class DefaultMigrationCluster extends AbstractObservable implements Migra
     @Override
     public String toString() {
         return String.format("[cluster:%s, state:%s]", clusterName(), currentState);
+    }
+
+    @VisibleForTesting
+    public void setMigrationState(MigrationState state) {
+        this.currentState = state;
+    }
+
+    @VisibleForTesting
+    public void setMigrationExecutors(Executor executors) {
+        this.executors = executors;
     }
 }

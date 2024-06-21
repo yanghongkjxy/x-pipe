@@ -1,5 +1,7 @@
 package com.ctrip.xpipe.redis.core.entity;
 
+import com.ctrip.xpipe.redis.core.store.ReplId;
+
 /**
  * @author wenchao.meng
  *
@@ -12,8 +14,8 @@ public class KeeperInstanceMeta extends KeeperTransMeta{
 		
 	}
 
-	public KeeperInstanceMeta(String clusterId, String shardId, KeeperMeta keeperMeta) {
-		super(clusterId, shardId, keeperMeta);
+	public KeeperInstanceMeta(ReplId replId, KeeperMeta keeperMeta) {
+		super(replId.id(), keeperMeta);
 	}
 
 }

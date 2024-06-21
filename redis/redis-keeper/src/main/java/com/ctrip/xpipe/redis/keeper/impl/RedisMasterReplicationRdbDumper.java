@@ -3,6 +3,7 @@ package com.ctrip.xpipe.redis.keeper.impl;
 import com.ctrip.xpipe.redis.core.store.DumpedRdbStore;
 import com.ctrip.xpipe.redis.keeper.RedisKeeperServer;
 import com.ctrip.xpipe.redis.keeper.RedisMasterReplication;
+import com.ctrip.xpipe.redis.keeper.config.KeeperResourceManager;
 
 import java.io.IOException;
 
@@ -14,9 +15,15 @@ import java.io.IOException;
 public class RedisMasterReplicationRdbDumper extends AbstractRdbDumper{
 
 	private RedisMasterReplication redisMasterReplication;
-	public RedisMasterReplicationRdbDumper(RedisMasterReplication redisMasterReplication, RedisKeeperServer redisKeeperServer) {
+	public RedisMasterReplicationRdbDumper(RedisMasterReplication redisMasterReplication,
+										   RedisKeeperServer redisKeeperServer, KeeperResourceManager resourceManager) {
 		super(redisKeeperServer);
 		this.redisMasterReplication = redisMasterReplication;
+	}
+
+	@Override
+	public boolean tryRordb() {
+		return redisMasterReplication.tryRordb();
 	}
 
 	@Override

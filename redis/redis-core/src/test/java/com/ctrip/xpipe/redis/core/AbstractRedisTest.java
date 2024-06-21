@@ -4,23 +4,29 @@ package com.ctrip.xpipe.redis.core;
 import com.ctrip.xpipe.AbstractTest;
 import com.ctrip.xpipe.api.pool.SimpleObjectPool;
 import com.ctrip.xpipe.api.server.Server.SERVER_ROLE;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
 import com.ctrip.xpipe.foundation.DefaultFoundationService;
 import com.ctrip.xpipe.netty.ByteBufUtils;
 import com.ctrip.xpipe.netty.NettyPoolUtil;
 import com.ctrip.xpipe.netty.commands.NettyClient;
 import com.ctrip.xpipe.redis.core.entity.*;
-import com.ctrip.xpipe.redis.core.meta.MetaClone;
+import com.ctrip.xpipe.redis.core.meta.clone.MetaCloneFacade;
 import com.ctrip.xpipe.redis.core.protocal.cmd.InfoCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.InfoResultExtractor;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser;
-import com.ctrip.xpipe.redis.core.server.FakeRedisServer;
+import com.ctrip.xpipe.redis.core.protocal.protocal.CommandBulkStringParser;
+import com.ctrip.xpipe.redis.core.redis.operation.RedisOp;
+import com.ctrip.xpipe.redis.core.redis.rdb.RdbParseListener;
+import com.ctrip.xpipe.redis.core.redis.rdb.RdbParser;
+import com.ctrip.xpipe.redis.core.redis.rdb.parser.AuxOnlyRdbParser;
+import com.ctrip.xpipe.redis.core.server.*;
 import com.ctrip.xpipe.redis.core.transform.DefaultSaxParser;
 import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.FileUtils;
 import com.ctrip.xpipe.utils.IpUtils;
 import com.ctrip.xpipe.utils.StringUtil;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.apache.commons.exec.CommandLine;
 import org.apache.commons.exec.DefaultExecutor;
 import org.apache.commons.exec.ExecuteException;
@@ -37,6 +43,7 @@ import java.net.URL;
 import java.util.*;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * @author wenchao.meng
@@ -135,7 +142,7 @@ public abstract class AbstractRedisTest extends AbstractTest {
 
     protected String toRedisProtocalString(String str) {
 
-        ByteBuf format = new BulkStringParser(str).format();
+        ByteBuf format = new CommandBulkStringParser(str).format();
         return ByteBufUtils.readToString(format);
 
     }
@@ -229,6 +236,18 @@ public abstract class AbstractRedisTest extends AbstractTest {
             jedis.incr("incr");
         }
         logger.info("[sendRandomMessage][ end ]{}", redisMeta.desc());
+    }
+
+    protected void sendRandomMessage(String ip, int port, int count, int messageLength) {
+        Jedis jedis = new Jedis(ip, port);
+        logger.info("[sendRandomMessage][begin]{}, {}", ip, port);
+        for (int i = 0; i < count; i++) {
+
+            long currentIndex = totalSendMessageCount.incrementAndGet();
+            jedis.set(String.valueOf(currentIndex), randomString(messageLength));
+            jedis.incr("incr");
+        }
+        logger.info("[sendRandomMessage][end]{}, {}", ip, port);
     }
 
     protected void sendMessage(RedisMeta redisMeta, int count, String message) {
@@ -341,7 +360,6 @@ public abstract class AbstractRedisTest extends AbstractTest {
 
     protected List<KeeperMeta> getDcKeepers(String dc, String clusterId, String shardId) {
         return getXpipeMeta().getDcs().get(dc).getClusters().get(clusterId).getShards().get(shardId).getKeepers();
-
     }
 
     protected List<RedisMeta> getDcRedises(String dc, String clusterId, String shardId) {
@@ -426,6 +444,21 @@ public abstract class AbstractRedisTest extends AbstractTest {
         return xpipeMeta;
     }
 
+    protected FakeXsyncServer startFakeXsyncServer(int serverPort, FakeXsyncHandler xsyncHandler) throws Exception {
+        FakeXsyncServer fakeXsyncServer = new FakeXsyncServer(serverPort, xsyncHandler);
+        fakeXsyncServer.initialize();
+        fakeXsyncServer.start();
+        add(fakeXsyncServer);
+        return fakeXsyncServer;
+    }
+    protected FakePsyncServer startFakePsyncServer(int serverPort, FakePsyncHandler psyncHandler) throws Exception {
+        FakePsyncServer fakePsyncServer = new FakePsyncServer(serverPort, psyncHandler);
+        fakePsyncServer.initialize();
+        fakePsyncServer.start();
+        add(fakePsyncServer);
+        return fakePsyncServer;
+    }
+
     protected FakeRedisServer startFakeRedisServer() throws Exception {
 
         int port = randomPort(6379, 6479);
@@ -479,13 +512,21 @@ public abstract class AbstractRedisTest extends AbstractTest {
         }
     }
 
+
     protected ClusterMeta differentCluster(String dc) {
+        return differentCluster(dc, 0);
+    }
+
+    protected ClusterMeta differentCluster(String dc, int index) {
 
         DcMeta dcMeta = getDcMeta(dc);
-        ClusterMeta clusterMeta = (ClusterMeta) MetaClone.clone((ClusterMeta) dcMeta.getClusters().values().toArray()[0]);
+        ClusterMeta clusterMeta = MetaCloneFacade.INSTANCE.clone((ClusterMeta) dcMeta.getClusters().values().toArray()[index]);
         clusterMeta.setId(randomString(10));
+        clusterMeta.setDbId(randomLong());
 
+        Long randomShardDbId = randomLong();
         for (ShardMeta shardMeta : clusterMeta.getShards().values()) {
+            shardMeta.setDbId(randomShardDbId++);
             for (KeeperMeta keeperMeta : shardMeta.getKeepers()) {
                 keeperMeta.setPort(keeperMeta.getPort() + 10000);
             }
@@ -531,15 +572,86 @@ public abstract class AbstractRedisTest extends AbstractTest {
         return result;
     }
 
+    protected List<ApplierMeta> createRandomAppliers(int count) {
+
+        List<Integer> ports = new LinkedList<>(randomPorts(count));
+        List<ApplierMeta> result = new LinkedList<>();
+        for (int i = 0; i < count; i++) {
+            ApplierMeta applierMeta = new ApplierMeta().setIp("localhost").setPort(ports.get(i));
+            if (i == 0) {
+                applierMeta.setActive(true);
+            } else {
+                applierMeta.setActive(false);
+            }
+            result.add(applierMeta);
+        }
+        return result;
+    }
+
+    protected List<RedisMeta> createRandomRedises(int count) {
+        List<Integer> ports = new LinkedList<>(randomPorts(count));
+        List<RedisMeta> result = new LinkedList<>();
+        for (int i = 0; i < count; i++) {
+            RedisMeta redisMeta = new RedisMeta().setIp("localhost").setPort(ports.get(i));
+            result.add(redisMeta);
+        }
+        return result;
+    }
+
     protected RedisMeta newRandomFakeRedisMeta() {
+        return newRandomFakeRedisMeta("127.0.0.1", 6379);
+    }
+
+    protected RedisMeta newRandomFakeRedisMeta(String ip, int port) {
         DcMeta dcMeta = new DcMeta("dc");
         ClusterMeta clusterMeta = new ClusterMeta("cluster");
-        clusterMeta.setActiveDc("dc");
+        clusterMeta.setActiveDc("dc").setType(ClusterType.ONE_WAY.toString()).setActiveRedisCheckRules("0,1");
         ShardMeta shardMeta = new ShardMeta("shard");
-        RedisMeta redis = new RedisMeta().setIp("127.0.0.1").setPort(6379);
+        RedisMeta redis = new RedisMeta().setIp(ip).setPort(port);
         shardMeta.addRedis(redis);
         clusterMeta.addShard(shardMeta);
         dcMeta.addCluster(clusterMeta);
         return redis;
     }
+
+    protected KeeperMeta newRandomFakeKeeperMeta(String ip, int port) {
+        DcMeta dcMeta = new DcMeta("dc");
+        ClusterMeta clusterMeta = new ClusterMeta("cluster");
+        clusterMeta.setActiveDc("dc").setType(ClusterType.ONE_WAY.toString()).setActiveRedisCheckRules("0,1");
+        ShardMeta shardMeta = new ShardMeta("shard");
+        KeeperMeta keeper = new KeeperMeta().setIp(ip).setPort(port);
+        shardMeta.addKeeper(keeper);
+        clusterMeta.addShard(shardMeta);
+        dcMeta.addCluster(clusterMeta);
+        return keeper;
+    }
+
+    protected Map<String, String> parseRdbAux(byte[] rdb) {
+        AuxOnlyRdbParser parser = new AuxOnlyRdbParser();
+        AtomicReference<Map<String,String>> auxMapRef = new AtomicReference<>();
+        parser.registerListener(new RdbParseListener() {
+            @Override
+            public void onRedisOp(RedisOp redisOp) {
+            }
+
+            @Override
+            public void onAux(String key, String value) {
+            }
+
+            @Override
+            public void onFinish(RdbParser<?> parser) {
+            }
+
+            @Override
+            public void onAuxFinish(Map<String, String> auxMap) {
+                auxMapRef.set(auxMap);
+            }
+        });
+
+        ByteBuf payload = Unpooled.wrappedBuffer(rdb);
+        while (!parser.isFinish()) parser.read(payload);
+
+        return auxMapRef.get();
+    }
+
 }

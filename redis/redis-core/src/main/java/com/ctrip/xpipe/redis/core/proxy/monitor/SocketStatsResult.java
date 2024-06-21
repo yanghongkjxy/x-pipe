@@ -7,6 +7,8 @@ import com.ctrip.xpipe.utils.ObjectUtils;
 import com.google.common.collect.Lists;
 import io.netty.buffer.ByteBuf;
 
+import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -16,11 +18,14 @@ import java.util.Objects;
  * <p>
  * Oct 31, 2018
  */
-public class SocketStatsResult {
+public class SocketStatsResult implements Serializable {
 
-    final private List<String> result;
+    private List<String> result;
 
-    final private long timestamp;
+    private long timestamp;
+
+    public SocketStatsResult() {
+    }
 
     public SocketStatsResult(List<String> result) {
         this.result = result;
@@ -94,6 +99,14 @@ public class SocketStatsResult {
     public int hashCode() {
 
         return Objects.hash(result, timestamp);
+    }
+
+    @Override
+    public SocketStatsResult clone() {
+        SocketStatsResult clone = new SocketStatsResult();
+        clone.timestamp = this.timestamp;
+        if (null != this.result) clone.result = new ArrayList<>(this.result);
+        return clone;
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.ctrip.xpipe.redis.integratedtest.keeper;
 
+import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.core.metaserver.MetaServerConsoleService.PrimaryDcChangeMessage;
 import com.ctrip.xpipe.redis.core.protocal.pojo.MasterInfo;
@@ -18,10 +19,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 
 import java.util.List;
 
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -63,26 +65,34 @@ public class KeeperMultiDcChangePrimary extends AbstractKeeperIntegratedMultiDc{
 		String backupDc = getBackupDc();
 		//change backup to primary
 		
-		when(dcMetaCache.getShardRedises(getClusterId(), getShardId())).thenReturn(getDcRedises(backupDc, getClusterId(), getShardId()));
-		when(currentMetaManager.getSurviveKeepers(getClusterId(), getShardId())).thenReturn(getDcKeepers(backupDc, getClusterId(), getShardId()));
-		
+		when(dcMetaCache.getShardRedises(getClusterDbId(), getShardDbId())).thenReturn(getDcRedises(backupDc, getClusterId(), getShardId()));
+		when(currentMetaManager.getSurviveKeepers(getClusterDbId(), getShardDbId())).thenReturn(getDcKeepers(backupDc, getClusterId(), getShardId()));
+
+		ClusterMeta clusterMeta = mock(ClusterMeta.class);
+		when(clusterMeta.getActiveDc()).thenReturn(primaryDc);
+		when(currentMetaManager.getClusterMeta(getClusterDbId())).thenReturn(clusterMeta);
+
 		logger.info(remarkableMessage("[make dc primary]change dc primary to:" + backupDc));
-		BecomePrimaryAction becomePrimaryAction = new BecomePrimaryAction(dcMetaCache, currentMetaManager, sentinelManager, offsetWaiter, new ExecutionLog(currentTestName()), getXpipeNettyClientKeyedObjectPool(), newMasterChooser, scheduled, executors);
-		PrimaryDcChangeMessage message = becomePrimaryAction.changePrimaryDc(getClusterId(), getShardId(), backupDc, new MasterInfo());
+		BecomePrimaryAction becomePrimaryAction = new BecomePrimaryAction(getClusterDbId(), getShardDbId(), dcMetaCache,
+				currentMetaManager, sentinelManager, offsetWaiter, new ExecutionLog(currentTestName()),
+				getXpipeNettyClientKeyedObjectPool(), newMasterChooser, scheduled, executors);
+		PrimaryDcChangeMessage message = becomePrimaryAction.changePrimaryDc(getClusterDbId(), getShardDbId(), backupDc, new MasterInfo());
 		logger.info("{}", message);
 
 		sleep(2000);
 		
 		logger.info(remarkableMessage("[make dc backup]change dc primary to:" + backupDc));
-		when(dcMetaCache.getPrimaryDc(getClusterId(), getShardId())).thenReturn(backupDc);
-		when(multiDcService.getActiveKeeper(backupDc, getClusterId(), getShardId())).thenReturn(getDcKeepers(backupDc, getClusterId(), getShardId()).get(0));
+		when(dcMetaCache.getPrimaryDc(getClusterDbId(), getShardDbId())).thenReturn(backupDc);
+		when(multiDcService.getActiveKeeper(backupDc, getClusterDbId(), getShardDbId())).thenReturn(getDcKeepers(backupDc, getClusterId(), getShardId()).get(0));
 		
-		when(dcMetaCache.getShardRedises(getClusterId(), getShardId())).thenReturn(getDcRedises(primaryDc, getClusterId(), getShardId()));
-		when(currentMetaManager.getKeeperActive(getClusterId(), getShardId())).thenReturn(getKeeperActive(primaryDc));
-		when(currentMetaManager.getSurviveKeepers(getClusterId(), getShardId())).thenReturn(getDcKeepers(primaryDc, getClusterId(), getShardId()));
+		when(dcMetaCache.getShardRedises(getClusterDbId(), getShardDbId())).thenReturn(getDcRedises(primaryDc, getClusterId(), getShardId()));
+		when(currentMetaManager.getKeeperActive(getClusterDbId(), getShardDbId())).thenReturn(getKeeperActive(primaryDc));
+		when(currentMetaManager.getSurviveKeepers(getClusterDbId(), getShardDbId())).thenReturn(getDcKeepers(primaryDc, getClusterId(), getShardId()));
 		
-		BecomeBackupAction becomeBackupAction = new BecomeBackupAction(dcMetaCache, currentMetaManager, sentinelManager, new ExecutionLog(currentTestName()), getXpipeNettyClientKeyedObjectPool(), multiDcService, scheduled, executors);
-		message = becomeBackupAction.changePrimaryDc(getClusterId(), getShardId(), backupDc, new MasterInfo());
+		BecomeBackupAction becomeBackupAction = new BecomeBackupAction(getClusterDbId(), getShardDbId(), dcMetaCache,
+				currentMetaManager, sentinelManager, new ExecutionLog(currentTestName()),
+				getXpipeNettyClientKeyedObjectPool(), multiDcService, scheduled, executors);
+		message = becomeBackupAction.changePrimaryDc(getClusterDbId(), getShardDbId(), backupDc, new MasterInfo());
 		logger.info("{}", message);
 
 		sleep(2000);

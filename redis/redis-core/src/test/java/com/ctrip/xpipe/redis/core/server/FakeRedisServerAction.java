@@ -1,13 +1,19 @@
 package com.ctrip.xpipe.redis.core.server;
 
+import com.ctrip.xpipe.api.payload.InOutPayload;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.netty.ByteBufUtils;
+import com.ctrip.xpipe.payload.ByteArrayOutputStreamPayload;
+import com.ctrip.xpipe.payload.StringInOutPayload;
 import com.ctrip.xpipe.redis.core.protocal.cmd.AbstractPsync;
-import com.ctrip.xpipe.redis.core.protocal.protocal.BulkStringParser;
+import com.ctrip.xpipe.redis.core.protocal.protocal.RdbBulkStringParser;
 import com.ctrip.xpipe.redis.core.redis.RunidGenerator;
 import com.ctrip.xpipe.utils.StringUtil;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import org.apache.commons.lang3.ArrayUtils;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -42,6 +48,7 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 	protected void handlePsync(OutputStream ous, String line) throws IOException, InterruptedException {
 		
 		logger.info("[handlePsync]{}", line);
+		fakeRedisServer.increasePsyncCount();
 		String []sp = line.split("\\s+");
 		if(sp[1].equalsIgnoreCase("?")){
 			handleFullSync(ous);
@@ -53,6 +60,12 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 	}
 
 	private void handlePartialSync(OutputStream ous, long offset) throws IOException, InterruptedException {
+
+		if(fakeRedisServer.isPartialSyncFail()){
+			logger.info("[handlePartialSync]partial sync fail, close socket");
+			closeSocket();
+			return;
+		}
 		
 		logger.info("[handlePartialSync]");
 		int index = (int) (offset - fakeRedisServer.getRdbOffset() -1);
@@ -70,6 +83,7 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 		writeCommands(ous);
 		
 	}
+
 
 	private void writeCommands(OutputStream ous) throws IOException, InterruptedException {
 		
@@ -105,6 +119,7 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 				while(true){
 					int data = ins.read();
 					if(data == -1){
+						logger.info("[doRun]read -1, close socket:{}", getSocket());
 						getSocket().close();
 						return;
 					}
@@ -122,7 +137,7 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 	private void handleFullSync(final OutputStream ous) throws IOException, InterruptedException {
 		
 		logger.info("[handleFullSync]{}", getSocket());
-		fakeRedisServer.reGenerateRdb();
+		fakeRedisServer.reGenerateRdb(this.capaRordb);
 		fakeRedisServer.addCommandsListener(this);
 
 		try {
@@ -150,19 +165,29 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 		
 		byte []rdb = null;
 		int  rdbStartPos = 0;
-		String rdbContent = fakeRedisServer.getRdbContent();
+		byte[] rdbContent = fakeRedisServer.getRdbContent();
 		if(fakeRedisServer.isEof()){
 			String mark = RunidGenerator.DEFAULT.generateRunid();
-			String content = "$EOF:" + mark + "\r\n" ;
-			rdbStartPos = content.length(); 
-			content += rdbContent + mark;
-			rdb = content.getBytes();
+			String header = "$EOF:" + mark + "\r\n" ;
+			rdbStartPos = header.length();
+
+			ByteArrayOutputStream os = new ByteArrayOutputStream();
+			os.write(header.getBytes());
+			os.write(rdbContent);
+			os.write(mark.getBytes());
+
+			rdb = os.toByteArray();
 			waitAckToSendCommands = true;
 		}else{
-			BulkStringParser bulkStringParser = new BulkStringParser(rdbContent);
+			InOutPayload payload = new ByteArrayOutputStreamPayload();
+			payload.startInput();
+			payload.in(Unpooled.wrappedBuffer(rdbContent));
+			payload.endInput();
+
+			RdbBulkStringParser bulkStringParser = new RdbBulkStringParser(payload);
 			ByteBuf byteBuf = bulkStringParser.format();
 			rdb = ByteBufUtils.readToBytes(byteBuf);
-			rdbStartPos = 3 + String.valueOf(rdbContent.length()).length();
+			rdbStartPos = 3 + String.valueOf(rdbContent.length).length();
 			waitAckToSendCommands = false;
 		}
 		if(logger.isDebugEnabled()){
@@ -170,8 +195,9 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 		}
 		
 		if(fakeRedisServer.getAndDecreaseSendHalfRdbAndCloseConnectionCount() > 0){
-			ous.write(rdb, 0, rdbStartPos + rdbContent.length()/2);
+			ous.write(rdb, 0, rdbStartPos + rdbContent.length/2);
 			ous.flush();
+			logger.info("[handleFullSync]halfsync after write half data,close socket:{}", getSocket());
 			ous.close();
 		}else{
 			ous.write(rdb);
@@ -182,7 +208,21 @@ public class FakeRedisServerAction extends AbstractRedisAction{
 			writeCommands(ous);
 		}
 	}
-	
+
+	protected byte[] handleConfigGet(String line) throws NumberFormatException, IOException {
+		String []sp = line.split("\\s+");
+		String param = sp[2];
+		if (param.equalsIgnoreCase("swap-repl-rordb-sync") && fakeRedisServer.isSupportRordb()) {
+			return "*2\r\n$20\r\nswap-repl-rordb-sync\r\n$3\r\nyes\r\n".getBytes();
+		}
+		return super.handleConfigGet(line);
+	}
+
+	@Override
+	protected boolean isKeeper() {
+		return fakeRedisServer.isKeeper();
+	}
+
 	@Override
 	protected void replconfAck(long ackPos) throws IOException, InterruptedException{
 		super.replconfAck(ackPos);

@@ -13,10 +13,11 @@ import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
-import org.mockito.runners.MockitoJUnitRunner;
+import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.web.client.ResourceAccessException;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.assertEquals;
@@ -64,8 +65,6 @@ public class ClusterMetaModifiedNotifierTest extends AbstractConsoleTest {
 		notifier.postConstruct();
 
 		when(metaServerConsoleServiceManagerWrapper.get(dcName)).thenReturn(mockedMetaServerConsoleService);
-		doThrow(new ResourceAccessException("test")).when(mockedMetaServerConsoleService).clusterAdded(clusterName,
-				mockedClusterMeta);
 		doThrow(new ResourceAccessException("test")).when(mockedMetaServerConsoleService).clusterDeleted(clusterName);
 		doThrow(new ResourceAccessException("test")).when(mockedMetaServerConsoleService).clusterModified(clusterName,
 				mockedClusterMeta);
@@ -74,8 +73,8 @@ public class ClusterMetaModifiedNotifierTest extends AbstractConsoleTest {
 
 	@Test
 	public void testNotifyClusterUpdate() throws InterruptedException {
-		notifier.notifyClusterUpdate(dcName, clusterName);
-		TimeUnit.SECONDS.sleep(3);
+		notifier.notifyClusterUpdate(clusterName, Collections.singletonList(dcName));
+		TimeUnit.SECONDS.sleep(1);
 		verify(metaServerConsoleServiceManagerWrapper, times(retryTimes)).get(dcName);
 		verify(mockedMetaServerConsoleService, times(retryTimes)).clusterModified(clusterName, mockedClusterMeta);
 		verify(notifier, times(1)).submitNotifyTask((MetaNotifyTask<?>) anyObject());
@@ -87,7 +86,7 @@ public class ClusterMetaModifiedNotifierTest extends AbstractConsoleTest {
 	@Test
 	public void testNotifyClusterDelete() throws InterruptedException {
 		notifier.notifyClusterDelete(clusterName, Arrays.asList(new DcTbl[] { mockedDcTbl }));
-		TimeUnit.SECONDS.sleep(3);
+		TimeUnit.SECONDS.sleep(1);
 		verify(metaServerConsoleServiceManagerWrapper, times(retryTimes)).get(dcName);
 		verify(mockedMetaServerConsoleService, times(retryTimes)).clusterDeleted(clusterName);
 		verify(mockedMetaServerConsoleService, times(retryTimes)).clusterDeleted(anyString());

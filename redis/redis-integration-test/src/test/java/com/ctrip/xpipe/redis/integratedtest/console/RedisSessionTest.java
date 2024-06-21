@@ -4,21 +4,18 @@ import com.ctrip.xpipe.api.endpoint.Endpoint;
 import com.ctrip.xpipe.api.proxy.ProxyConnectProtocol;
 import com.ctrip.xpipe.endpoint.DefaultEndPoint;
 import com.ctrip.xpipe.lifecycle.LifecycleHelper;
+import com.ctrip.xpipe.netty.commands.NettyKeyedPoolClientFactory;
 import com.ctrip.xpipe.pool.XpipeNettyClientKeyedObjectPool;
-import com.ctrip.xpipe.proxy.ProxyEnabledEndpoint;
-import com.ctrip.xpipe.redis.console.healthcheck.session.Callbackable;
-import com.ctrip.xpipe.redis.console.healthcheck.session.PingCallback;
-import com.ctrip.xpipe.redis.console.healthcheck.session.RedisSession;
+import com.ctrip.xpipe.redis.checker.TestConfig;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.Callbackable;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.PingCallback;
+import com.ctrip.xpipe.redis.checker.healthcheck.session.RedisSession;
 import com.ctrip.xpipe.redis.core.entity.RedisMeta;
 import com.ctrip.xpipe.redis.core.protocal.cmd.pubsub.PublishCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.pubsub.SubscribeCommand;
 import com.ctrip.xpipe.redis.core.protocal.cmd.pubsub.SubscribeListener;
+import com.ctrip.xpipe.redis.core.protocal.pojo.Role;
 import com.ctrip.xpipe.redis.core.proxy.parser.DefaultProxyConnectProtocolParser;
-import com.ctrip.xpipe.redis.core.proxy.ProxyResourceManager;
-import com.ctrip.xpipe.redis.core.proxy.endpoint.DefaultProxyEndpointManager;
-import com.ctrip.xpipe.redis.core.proxy.endpoint.NaiveNextHopAlgorithm;
-import com.ctrip.xpipe.redis.core.proxy.netty.ProxyEnabledNettyKeyedPoolClientFactory;
-import com.ctrip.xpipe.redis.core.proxy.resource.ConsoleProxyResourceManager;
 import com.ctrip.xpipe.redis.integratedtest.AbstractIntegratedTest;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,7 +45,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         RedisMeta redisMeta = new RedisMeta().setIp("127.0.0.1").setPort(redisPort);
         startRedis(redisMeta);
         endpoint = new DefaultEndPoint(redisMeta.getIp(), redisMeta.getPort());
-        redisSession = new RedisSession(endpoint, scheduled, getReqResNettyClientPool());
+        redisSession = new RedisSession(endpoint, scheduled, getReqResNettyClientPool(), new TestConfig());
     }
 
     @Test
@@ -70,7 +67,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         PublishCommand publishCommand = new PublishCommand(getXpipeNettyClientKeyedObjectPool().getKeyPool(endpoint),
                 scheduled, SUBSCRIBE_CHANNEL, message);
         publishCommand.execute();
-        waitConditionUntilTimeOut(()->result.get() != null, 1000);
+        waitConditionUntilTimeOut(()->result.get() != null, 5000);
         logger.info("[message] result: {}", result.get());
         Assert.assertEquals(message, result.get());
     }
@@ -89,7 +86,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         AtomicReference<String> result = new AtomicReference<>();
         AtomicBoolean recieved = new AtomicBoolean(false);
         final String message = "hello-world";
-        redisSession.subscribeIfAbsent(SUBSCRIBE_CHANNEL, new RedisSession.SubscribeCallback() {
+        redisSession.subscribeIfAbsent(new RedisSession.SubscribeCallback() {
             @Override
             public void message(String channel, String message) {
                 result.set(message);
@@ -102,10 +99,10 @@ public class RedisSessionTest extends AbstractIntegratedTest {
                 recieved.getAndSet(true);
                 logger.error("[fail] cause: ", e);
             }
-        });
+        }, SUBSCRIBE_CHANNEL);
         Thread.sleep(1000);
         redisSession.publish(SUBSCRIBE_CHANNEL, message);
-        Thread.sleep(1000);
+        waitConditionUntilTimeOut(()->result.get()!=null, 2000);
         Assert.assertNotNull(result.get());
         Assert.assertEquals(message, result.get());
     }
@@ -136,7 +133,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
     public void testRole() throws InterruptedException {
         redisSession.role(new RedisSession.RollCallback() {
             @Override
-            public void role(String role) {
+            public void role(String role, Role detail) {
                 logger.info("[role] success: {}", role);
             }
 
@@ -164,10 +161,10 @@ public class RedisSessionTest extends AbstractIntegratedTest {
 
     @Test
     public void testInfo() throws InterruptedException {
-        redisSession.info("server", new Callbackable<String>() {
+        redisSession.info("replication", new Callbackable<String>() {
             @Override
             public void success(String message) {
-                logger.info("[info] message: ", message);
+                logger.info("[info] message: {}", message);
             }
 
             @Override
@@ -225,16 +222,12 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         });
     }
 
-
-    private ProxyResourceManager resourceManager = new ConsoleProxyResourceManager(
-            new DefaultProxyEndpointManager(()->1), new NaiveNextHopAlgorithm());
-
     @Test
     public void testPingThroughProxy() throws Exception {
         String protocolStr = "PROXY ROUTE PROXYTCP://10.5.111.164:80 TCP://10.5.111.145:6379";
         ProxyConnectProtocol protocol = new DefaultProxyConnectProtocolParser().read(protocolStr);
-        endpoint = new ProxyEnabledEndpoint("10.5.111.145", 6379, protocol);
-        redisSession = new RedisSession(endpoint, scheduled, getReqResNettyClientPool());
+        endpoint = new DefaultEndPoint("10.5.111.145", 6379, protocol);
+        redisSession = new RedisSession(endpoint, scheduled, getReqResNettyClientPool(), new TestConfig());
         redisSession.ping(new PingCallback() {
             @Override
             public void pong(String pongMsg) {
@@ -253,9 +246,9 @@ public class RedisSessionTest extends AbstractIntegratedTest {
     public void testSubThroughProxy() throws Exception {
         String protocolStr = "PROXY ROUTE PROXYTCP://10.5.111.148:80 TCP://10.5.111.145:6379";
         ProxyConnectProtocol protocol = new DefaultProxyConnectProtocolParser().read(protocolStr);
-        endpoint = new ProxyEnabledEndpoint("10.5.111.145", 6379, protocol);
-        redisSession = new RedisSession(endpoint, scheduled, getReqResNettyClientPool());
-        redisSession.subscribeIfAbsent(SUBSCRIBE_CHANNEL, new RedisSession.SubscribeCallback() {
+        endpoint = new DefaultEndPoint("10.5.111.145", 6379, protocol);
+        redisSession = new RedisSession(endpoint, scheduled, getReqResNettyClientPool(), new TestConfig());
+        redisSession.subscribeIfAbsent(new RedisSession.SubscribeCallback() {
             @Override
             public void message(String channel, String message) {
                 logger.info("[receive] channel: {}, message: {}", channel, message);
@@ -265,7 +258,7 @@ public class RedisSessionTest extends AbstractIntegratedTest {
             public void fail(Throwable e) {
 
             }
-        });
+        }, SUBSCRIBE_CHANNEL);
         Thread.sleep(10);
         redisSession.publish(SUBSCRIBE_CHANNEL, "hello-world");
         redisSession.publish(SUBSCRIBE_CHANNEL, "hello-world1");
@@ -303,18 +296,12 @@ public class RedisSessionTest extends AbstractIntegratedTest {
         return keyedObjectPool;
     }
 
-    private ProxyEnabledNettyKeyedPoolClientFactory getKeyedPoolClientFactory() {
-        return new ProxyEnabledNettyKeyedPoolClientFactory(resourceManager);
+    private NettyKeyedPoolClientFactory getKeyedPoolClientFactory() {
+        return new NettyKeyedPoolClientFactory();
     }
 
     @Override
     protected List<RedisMeta> getRedisSlaves() {
         return null;
     }
-
-//
-//    @Override
-//    protected List<RedisMeta> getRedisSlaves() {
-//        return null;
-//    }
 }

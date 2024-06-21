@@ -16,8 +16,8 @@ import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.entity.DcMeta;
 import com.ctrip.xpipe.redis.core.entity.RouteMeta;
 import com.ctrip.xpipe.retry.RetryDelay;
-import com.google.common.collect.Lists;
 import org.junit.Assert;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -92,7 +92,7 @@ public class AdvancedDcMetaServiceTest extends AbstractConsoleIntegrationTest {
     }
 
     @Test
-    public void testGetDcMeta() {
+    public void testGetDcMeta() throws Exception {
         long start = System.currentTimeMillis();
         DcMeta dcMeta = service.getDcMeta("jq");
         long end = System.currentTimeMillis();
@@ -101,7 +101,7 @@ public class AdvancedDcMetaServiceTest extends AbstractConsoleIntegrationTest {
     }
 
     @Test
-    public void testGetDcMeta2() {
+    public void testGetDcMeta2() throws Exception {
         long start = System.currentTimeMillis();
         for(int i = 0; i < 100; i++) {
             dcMetaService.getDcMeta(dcNames[(1&i)]);
@@ -129,26 +129,29 @@ public class AdvancedDcMetaServiceTest extends AbstractConsoleIntegrationTest {
     }
 
     @Test
-    public void testClusterOrgInfo() {
+    public void testClusterOrgInfo() throws Exception {
         List<ClusterTbl> clusterTbls = clusterService.findAllClustersWithOrgInfo();
-        logger.info("{}", clusterTbls.size());
 
-        ClusterTbl clusterTbl = clusterTbls.get(0);
+        ClusterTbl clusterTbl = clusterTbls.get(3);
         clusterTbl.setClusterOrgId(3);
         clusterService.update(clusterTbl);
 
-        logger.info("{}", clusterService.find(clusterTbl.getId()));
-
         DcMeta dcMeta = service.getDcMeta("jq");
-        List<ClusterMeta> clusters = Lists.newArrayList(dcMeta.getClusters().values());
 
-        logger.info("{}", clusters.get(0));
-        Assert.assertNotNull(clusters.get(0).getOrgId());
-        Assert.assertTrue(3 == clusters.get(0).getOrgId());
+        ClusterMeta clusterMeta = dcMeta.findCluster(clusterTbl.getClusterName());
+        Assert.assertNotNull(clusterMeta.getOrgId());
+        Assert.assertTrue(3 == clusterMeta.getOrgId());
     }
 
     @Override
     protected String prepareDatas() throws IOException {
         return prepareDatasFromFile("src/test/resources/apptest.sql");
+    }
+
+    @Ignore
+    @Test
+    public void testHangForever() throws Exception {
+//        proxyService.deleteProxy();
+        dcMetaService.getDcMeta("jq");
     }
 }

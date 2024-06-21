@@ -62,6 +62,11 @@ public class XPipeMetaVisitor implements IVisitor{
     }
 
     @Override
+    public void visitAz(AzMeta az) {
+
+    }
+
+    @Override
     public void visitCluster(ClusterMeta cluster) {
         ClusterMeta clusterMeta = clusterMetaMap.get(cluster.getId());
         Assert.assertTrue(clusterMeta.equals(cluster));
@@ -100,6 +105,12 @@ public class XPipeMetaVisitor implements IVisitor{
     }
 
     @Override
+    public void visitRedisCheckRule(RedisCheckRuleMeta redisCheckRule) {
+
+    }
+
+
+    @Override
     public void visitRoute(RouteMeta route) {
 
     }
@@ -125,6 +136,21 @@ public class XPipeMetaVisitor implements IVisitor{
 
     @Override
     public void visitZkServer(ZkServerMeta zkServer) {
+
+    }
+
+    @Override
+    public void visitApplier(ApplierMeta applier) {
+
+    }
+
+    @Override
+    public void visitApplierContainer(ApplierContainerMeta applierContainer) {
+
+    }
+
+    @Override
+    public void visitSource(SourceMeta source) {
 
     }
 }

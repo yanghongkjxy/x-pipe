@@ -1,15 +1,15 @@
 package com.ctrip.xpipe.service.metric;
 
 import com.ctrip.framework.foundation.Foundation;
-import com.ctrip.hickwall.proxy.HickwallClient;
-import com.ctrip.hickwall.proxy.common.DataPoint;
+import com.ctrip.xpipe.api.foundation.FoundationService;
 import com.ctrip.xpipe.concurrent.AbstractExceptionLogTask;
 import com.ctrip.xpipe.endpoint.HostPort;
 import com.ctrip.xpipe.metric.MetricData;
 import com.ctrip.xpipe.metric.MetricProxy;
-import com.ctrip.xpipe.metric.MetricProxyException;
 import com.ctrip.xpipe.utils.VisibleForTesting;
 import com.ctrip.xpipe.utils.XpipeThreadFactory;
+import org.influxdb.InfluxDBIOException;
+import org.influxdb.dto.Point;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,155 +25,169 @@ import java.util.concurrent.*;
  */
 public class HickwallMetric implements MetricProxy {
 
-	private static Logger logger = LoggerFactory.getLogger(HickwallMetric.class);
-	
-	private HickwallConfig config = new HickwallConfig();
-	
-	private BlockingQueue<DataPoint> datas;
+    private HickwallConfig config;
 
-	private HickwallClient client;
+    private BlockingQueue<Point> datas;
 
-	private ArrayList<DataPoint> dataToSend = null;
+    private InfluxDbClient client;
 
-	private static final int NUM_MESSAGES_PER_SEND = 100;
+    private ArrayList<Point> dataToSend = null;
 
-	private static final int HICKWALL_SEND_INTERVAL = 2000;
-	
-	public HickwallMetric() {
-		start();
-	}
-	
-	private void start() {
-		logger.info("Hickwall proxy started.");
-		
-		datas = new ArrayBlockingQueue<>(config.getHickwallQueueSize());
+    private String srcConsoleIpTag = getFormattedSrcAddr(getLocalIP());
 
-		ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1,
-				XpipeThreadFactory.create("HickwallSender", true));
-		tryUntilConnected();
+    private String localIp = getLocalIP();
 
-		scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
-			@Override
-			protected void doRun() throws Exception {
+    protected static int HICKWALL_SEND_INTERVAL = 2000;
 
-				while(datas.size() >= NUM_MESSAGES_PER_SEND) {
-					if (dataToSend == null) {
-						dataToSend = new ArrayList<>();
-						datas.drainTo(dataToSend, NUM_MESSAGES_PER_SEND);
-					}
+    private static final int WAIT_SECONDS_AFTER_METRIC_FAIL = 5;
 
-					try {
-						client.send(dataToSend);
-						dataToSend = null;
-					} catch (IOException e) {
-						logger.error("Error write data to metric server{}", config.getHickwallHostPort(), e);
-						tryUntilConnected();
-					} catch (Exception e) {
-						logger.error("Error write data to metric server{}", config.getHickwallHostPort(), e);
-						try {
-							TimeUnit.SECONDS.sleep(10);
-						} catch (InterruptedException e1) {
-							Thread.currentThread().interrupt();
-						}
-					}
-				}
+    private static final String CURRENT_DC_ID = FoundationService.DEFAULT.getDataCenter();
 
-			}
-		}, HICKWALL_SEND_INTERVAL, HICKWALL_SEND_INTERVAL, TimeUnit.MILLISECONDS);
-	}
-	
-	private void tryUntilConnected() {
+    private static final Logger logger = LoggerFactory.getLogger(HickwallMetric.class);
 
-		while(! Thread.currentThread().isInterrupted()) {
+    public HickwallMetric(HickwallConfig config) {
+        this.config = config;
+        start();
+    }
 
-			String hickwallHostPort = config.getHickwallHostPort();
-			try {
-				logger.info("[tryUntilConnected][begin]{}", hickwallHostPort);
-				client = new HickwallClient(hickwallHostPort);
-				logger.info("[tryUntilConnected][end]{}", hickwallHostPort);
-				break;
-			} catch (IOException e) {
-				logger.error("Error connect to metric server {}", hickwallHostPort, e);
-				try {
-					TimeUnit.SECONDS.sleep(5);
-				} catch (InterruptedException e1) {
-					Thread.currentThread().interrupt();
-				}
-			}
-		}
-	}
-	
-	@Override
-	public void writeBinMultiDataPoint(MetricData rawData) throws MetricProxyException {
-		DataPoint bmp = convertToHickwallFormat(rawData);
+    public HickwallMetric() {
+        this(new HickwallConfig());
+    }
 
-		if (!datas.offer(bmp)) {
-			logger.error("Hickwall queue overflow, will drop data");
-		}
-	}
-	
-	private DataPoint convertToHickwallFormat(MetricData md) {
+    private void start() {
+        logger.info("Hickwall proxy started.");
 
-		DataPoint dp = new DataPoint(metricName(md), md.getValue(), md.getTimestampMilli() * 1000000);
-		// cluster.shard.10_2_2_2_6379.10_28_142_142 (cluster.shard.redis+port.console)
-		dp.setEndpoint(getEndpoint(md));
-		dp.getMeta().put("measurement", String.format("fx.xpipe.%s", md.getMetricType()));
-		dp.getTag().put("cluster", md.getClusterName());
-		dp.getTag().put("shard", md.getShardName());
-		dp.getTag().put("address", md.getHostPort().toString());
-		dp.getTag().put("srcaddr", getLocalIP());
-		dp.getTag().put("app", "fx");
-		dp.getTag().put("dc", md.getDcName());
-		addOtherTags(dp, md);
-		return dp;
-	}
+        datas = new ArrayBlockingQueue<>(config.getHickwallQueueSize());
 
-	private String metricName(MetricData md) {
+        ScheduledExecutorService scheduled = Executors.newScheduledThreadPool(1,
+                XpipeThreadFactory.create("HickwallSender", true));
+        this.client = new InfluxDbClient(config.getHickwallAddress(), config.getHickwallDatabase());
 
-		HostPort hostPort = md.getHostPort();
-		String metricNamePrefix = toMetricNamePrefix(md);
-		String metricName = metricNamePrefix;
-		if(hostPort != null){
-			metricName += "." + hostPort.getHost() + "." + hostPort.getPort() + "." + getLocalIP();
-		}
-		return metricName;
-	}
+        scheduled.scheduleWithFixedDelay(new AbstractExceptionLogTask() {
+            @Override
+            protected void doRun() {
 
-	private String toMetricNamePrefix(MetricData metricData) {
-		return String.format("fx.xpipe.%s.%s.%s", metricData.getMetricType(), metricData.getClusterName(), metricData.getShardName());
-	}
+                while(datas.size() >= config.getHickwallBatchSize()) {
+                    if (dataToSend == null) {
+                        dataToSend = new ArrayList<>();
+                        datas.drainTo(dataToSend, config.getHickwallBatchSize());
+                    }
 
-	private void addOtherTags(DataPoint dp, MetricData md) {
-		if(md.getTags() != null && !md.getTags().isEmpty()) {
-			for(Map.Entry<String, String> entry : md.getTags().entrySet()) {
-				dp.getTag().put(entry.getKey(), entry.getValue());
-			}
-		}
-	}
+                    try {
+                        if (config.getHickwallWriteMonitor()) client.sendWithMonitor(dataToSend);
+                        else client.send(dataToSend);
+                        dataToSend = null;
+                    } catch (IOException | InfluxDBIOException ioException) {
+                        logger.error("[metric][fail][io] client:{}, msg:{}", client, ioException.getMessage());
+                        tryUntilConnected();
+                    } catch (Throwable th) {
+                        logger.error("[metric][fail][unknown] client:{}", client, th);
+                        sleepAfterFail();
+                    }
+                }
+            }
+        }, HICKWALL_SEND_INTERVAL, HICKWALL_SEND_INTERVAL, TimeUnit.MILLISECONDS);
+    }
 
-	private String getLocalIP() {
-		return Foundation.net().getHostAddress();
-	}
+    private void tryUntilConnected() {
+        while(! Thread.currentThread().isInterrupted()) {
+            String address = config.getHickwallAddress();
+            String database = config.getHickwallDatabase();
+            if (null == client) {
+                client = new InfluxDbClient(address, database);
+            }
 
-	private String getEndpoint(MetricData md) {
-		String redisToPattern = getFormattedRedisAddr(md.getHostPort());
-		String srcConsoleIpToPattern = getFormattedSrcAddr(getLocalIP());
-		return String.format("%s.%s.%s.%s", md.getClusterName(), md.getShardName(), redisToPattern, srcConsoleIpToPattern);
-	}
+            if (!address.equals(client.getHost()) || !database.equals(client.getDb())) {
+                logger.info("[tryUntilConnected][client-update] old: {}", client);
+                try {
+                    client.close();
+                } catch (Throwable th) {
+                    logger.warn("[refreshClient][{}] old client close fail", client, th);
+                }
+                client = new InfluxDbClient(address, database);
+                logger.info("[tryUntilConnected][client-update] new: {}", client);
+            }
 
-	@VisibleForTesting
-	protected String getFormattedRedisAddr(HostPort hostPort) {
-		return hostPort.getHost().replaceAll("\\.", "_") + "_" + hostPort.getPort();
-	}
+            try {
+                logger.info("[tryUntilConnected][begin] {}", client);
+                client.ping();
+                logger.info("[tryUntilConnected][end] {}", client);
+                break;
+            } catch (InfluxDBIOException e) {
+                logger.error("[tryUntilConnected][fail][{}] sleep a while", address, e);
+                sleepAfterFail();
+            }
+        }
+    }
 
-	@VisibleForTesting
-	protected String getFormattedSrcAddr(String ipAddr) {
-		return ipAddr.replaceAll("\\.", "_");
-	}
+    private void sleepAfterFail() {
+        try {
+            TimeUnit.SECONDS.sleep(WAIT_SECONDS_AFTER_METRIC_FAIL);
+        } catch (InterruptedException interrupt) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
-	@Override
-	public int getOrder() {
-		return 0;
-	}
+    @Override
+    public void writeBinMultiDataPoint(MetricData rawData) {
+        Point point = metricData2InfluxDbPoint(rawData);
+
+        if (!datas.offer(point)) {
+            logger.warn("[writeBinMultiDataPoint][queue-overflow] drop data {}", rawData);
+        }
+    }
+
+    private Point metricData2InfluxDbPoint(MetricData md) {
+        Point.Builder pointBuilder = Point.measurement(String.format("fx.xpipe.%s", md.getMetricType()))
+                .time(md.getTimestampMilli(), TimeUnit.MILLISECONDS)
+                .addField("value", md.getValue())
+                .tag("srcaddr", localIp)
+                .tag("app", "fx")
+                .tag("source", CURRENT_DC_ID);
+
+        if (null != md.getDcName()) pointBuilder.tag("dc", md.getDcName());
+        if (null != md.getHostPort()) pointBuilder.tag("address", md.getHostPort().toString());
+        if (null != md.getClusterName()) pointBuilder.tag("cluster", md.getClusterName());
+        if (null != md.getShardName()) pointBuilder.tag("shard", md.getShardName());
+        if (null != md.getClusterType()) pointBuilder.tag("clustertype", md.getClusterType());
+        if (null != md.getTags() && !md.getTags().isEmpty()) {
+            for(Map.Entry<String, String> entry : md.getTags().entrySet()) {
+                pointBuilder.tag(entry.getKey(), entry.getValue());
+            }
+        }
+
+        return pointBuilder.build();
+    }
+
+    private String getLocalIP() {
+        return Foundation.net().getHostAddress();
+    }
+
+    @VisibleForTesting
+    protected String getFormattedRedisAddr(HostPort hostPort) {
+        return hostPort.getHost().replaceAll("\\.", "_") + "_" + hostPort.getPort();
+    }
+
+    @VisibleForTesting
+    protected String getFormattedSrcAddr(String ipAddr) {
+        return ipAddr.replaceAll("\\.", "_");
+    }
+
+    @VisibleForTesting
+    protected void setInfluxDbClient(InfluxDbClient client) {
+        if (null != this.client) {
+            try {
+                this.client.close();
+            } catch (Throwable th) {
+                logger.info("[setInfluxDbClient][close fail] old client {}", this.client);
+            }
+        }
+        this.client = client;
+    }
+
+    @Override
+    public int getOrder() {
+        return 0;
+    }
 
 }

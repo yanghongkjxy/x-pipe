@@ -3,15 +3,19 @@ package com.ctrip.xpipe.redis.core.proxy.monitor;
 
 import com.ctrip.xpipe.exception.XpipeRuntimeException;
 
+import java.io.Serializable;
 import java.util.Objects;
 
-public class TunnelSocketStatsResult {
+public class TunnelSocketStatsResult implements Serializable {
 
     private String tunnelId;
 
     private SocketStatsResult frontendSocketStats;
 
     private SocketStatsResult backendSocketStats;
+
+    public TunnelSocketStatsResult() {
+    }
 
     public TunnelSocketStatsResult(String tunnelId, SocketStatsResult frontendSocketStats,
                                    SocketStatsResult backendSocketStats) {
@@ -57,6 +61,21 @@ public class TunnelSocketStatsResult {
         return backendSocketStats;
     }
 
+    public TunnelSocketStatsResult setTunnelId(String tunnelId) {
+        this.tunnelId = tunnelId;
+        return this;
+    }
+
+    public TunnelSocketStatsResult setFrontendSocketStats(SocketStatsResult frontendSocketStats) {
+        this.frontendSocketStats = frontendSocketStats;
+        return this;
+    }
+
+    public TunnelSocketStatsResult setBackendSocketStats(SocketStatsResult backendSocketStats) {
+        this.backendSocketStats = backendSocketStats;
+        return this;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -71,6 +90,15 @@ public class TunnelSocketStatsResult {
     public int hashCode() {
 
         return Objects.hash(tunnelId, frontendSocketStats, backendSocketStats);
+    }
+
+    @Override
+    public TunnelSocketStatsResult clone() {
+        TunnelSocketStatsResult clone = new TunnelSocketStatsResult();
+        clone.tunnelId = this.tunnelId;
+        if (null != this.frontendSocketStats) clone.frontendSocketStats = this.frontendSocketStats.clone();
+        if (null != this.backendSocketStats) clone.backendSocketStats = this.backendSocketStats.clone();
+        return clone;
     }
 
     @Override

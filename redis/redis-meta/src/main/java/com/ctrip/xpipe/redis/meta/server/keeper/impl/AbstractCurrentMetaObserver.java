@@ -1,14 +1,18 @@
 package com.ctrip.xpipe.redis.meta.server.keeper.impl;
 
+import com.ctrip.xpipe.api.lifecycle.Releasable;
 import com.ctrip.xpipe.api.observer.Observable;
 import com.ctrip.xpipe.api.observer.Observer;
+import com.ctrip.xpipe.cluster.ClusterType;
 import com.ctrip.xpipe.observer.AbstractLifecycleObservable;
 import com.ctrip.xpipe.observer.NodeAdded;
 import com.ctrip.xpipe.observer.NodeDeleted;
 import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
 import com.ctrip.xpipe.redis.core.meta.comparator.ClusterMetaComparator;
 import com.ctrip.xpipe.redis.meta.server.cluster.CurrentClusterServer;
+import com.ctrip.xpipe.redis.meta.server.keeper.ClusterTypeAware;
 import com.ctrip.xpipe.redis.meta.server.meta.CurrentMetaManager;
+import com.ctrip.xpipe.utils.StringUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
@@ -16,7 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
  *
  * Sep 4, 2016
  */
-public abstract class AbstractCurrentMetaObserver extends AbstractLifecycleObservable implements Observer{
+public abstract class AbstractCurrentMetaObserver extends AbstractLifecycleObservable implements Observer, ClusterTypeAware {
 	
 	@Autowired
 	protected CurrentMetaManager currentMetaManager;
@@ -44,26 +48,53 @@ public abstract class AbstractCurrentMetaObserver extends AbstractLifecycleObser
 		
 		if(args instanceof NodeAdded){
 			ClusterMeta clusterMeta = (ClusterMeta)((NodeAdded)args).getNode();
-			logger.info("[update][add][{}]{}", getClass().getSimpleName(), clusterMeta.getId());
-			handleClusterAdd(clusterMeta);
+			if (supportCluster(clusterMeta)) {
+				logger.info("[update][add][{}]cluster_{}", getClass().getSimpleName(), clusterMeta.getDbId());
+				handleClusterAdd(clusterMeta);
+			}
 			return;
 		}
 		
 		if(args instanceof NodeDeleted){
 			ClusterMeta clusterMeta = (ClusterMeta)((NodeDeleted)args).getNode();
-			logger.info("[update][delete][{}]{}", getClass().getSimpleName(), clusterMeta.getId());
-			handleClusterDeleted(clusterMeta);
+			if (supportCluster(clusterMeta)) {
+				logger.info("[update][delete][{}]cluster_{}", getClass().getSimpleName(), clusterMeta.getDbId());
+				handleClusterDeleted(clusterMeta);
+			}
 			return;
 		}
 		
 		if(args instanceof ClusterMetaComparator){
 			ClusterMetaComparator clusterMetaComparator = (ClusterMetaComparator)args;
-			logger.info("[update][modify][{}]{}", getClass().getSimpleName(), clusterMetaComparator);
-			handleClusterModified(clusterMetaComparator);
+			if (supportCluster(clusterMetaComparator.getCurrent())) {
+				logger.info("[update][modify][{}]{}", getClass().getSimpleName(), clusterMetaComparator);
+				handleClusterModified(clusterMetaComparator);
+			}
 			return;
 		}
 		
 		throw new IllegalArgumentException("unknown argument:" + args);
+	}
+
+	protected boolean registerJob(Long clusterDbId, Long shardDbId, Releasable releasable) {
+		try {
+			currentMetaManager.addResource(clusterDbId, shardDbId, releasable);
+		} catch (Exception e) {
+			try {
+				logger.info("[registerJob][cluster_{}][shard_{}] cancel job registration", clusterDbId, shardDbId, e);
+				releasable.release();
+			} catch (Throwable t) {
+				logger.warn("[registerJob][cluster_{}][shard_{}]", clusterDbId, shardDbId, t);
+			}
+			return false;
+		}
+		return true;
+	}
+
+	protected boolean supportCluster(ClusterMeta clusterMeta) {
+		return clusterMeta != null
+				&& !StringUtil.isEmpty(clusterMeta.getType())
+				&& getSupportClusterTypes().contains(ClusterType.lookup(clusterMeta.getType()));
 	}
 
 	protected abstract void handleClusterModified(ClusterMetaComparator comparator);

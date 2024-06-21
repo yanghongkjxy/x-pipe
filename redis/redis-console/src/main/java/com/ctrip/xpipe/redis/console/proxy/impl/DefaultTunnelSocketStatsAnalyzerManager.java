@@ -1,25 +1,25 @@
 package com.ctrip.xpipe.redis.console.proxy.impl;
 
+import com.ctrip.xpipe.api.config.ConfigChangeListener;
 import com.ctrip.xpipe.lifecycle.AbstractStartStoppable;
 import com.ctrip.xpipe.metric.MetricProxy;
+import com.ctrip.xpipe.redis.checker.model.DcClusterShardPeer;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfig;
+import com.ctrip.xpipe.redis.checker.healthcheck.leader.SafeLoop;
+import com.ctrip.xpipe.redis.checker.model.DcClusterShard;
 import com.ctrip.xpipe.redis.console.config.ConsoleConfigListener;
-import com.ctrip.xpipe.redis.console.healthcheck.crossdc.SafeLoop;
-import com.ctrip.xpipe.redis.console.model.DcClusterShard;
 import com.ctrip.xpipe.redis.console.model.consoleportal.TunnelSocketStatsMetric;
 import com.ctrip.xpipe.redis.console.model.consoleportal.TunnelSocketStatsMetricOverview;
 import com.ctrip.xpipe.redis.console.proxy.ProxyChain;
 import com.ctrip.xpipe.redis.console.proxy.ProxyChainAnalyzer;
 import com.ctrip.xpipe.redis.console.proxy.TunnelSocketStatsAnalyzer;
 import com.ctrip.xpipe.redis.console.proxy.TunnelSocketStatsAnalyzerManager;
-import com.ctrip.xpipe.redis.console.spring.ConsoleContextConfig;
 import com.ctrip.xpipe.redis.core.proxy.monitor.TunnelSocketStatsResult;
 import com.ctrip.xpipe.tuple.Pair;
 import com.ctrip.xpipe.utils.ServicesUtil;
 import com.ctrip.xpipe.utils.StringUtil;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Queues;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -27,10 +27,10 @@ import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 
 import static com.ctrip.xpipe.redis.console.config.impl.DefaultConsoleConfig.KEY_SOCKET_STATS_ANALYZERS;
+import static com.ctrip.xpipe.spring.AbstractSpringConfigContext.GLOBAL_EXECUTOR;
 
 @Component
 public class DefaultTunnelSocketStatsAnalyzerManager extends AbstractStartStoppable implements TunnelSocketStatsAnalyzerManager {
@@ -38,7 +38,7 @@ public class DefaultTunnelSocketStatsAnalyzerManager extends AbstractStartStoppa
     @Autowired
     private ConsoleConfig config;
 
-    @Resource(name = ConsoleContextConfig.GLOBAL_EXECUTOR)
+    @Resource(name = GLOBAL_EXECUTOR)
     private ExecutorService executors;
 
     @Autowired
@@ -61,22 +61,17 @@ public class DefaultTunnelSocketStatsAnalyzerManager extends AbstractStartStoppa
         } catch (Exception e) {
             logger.error("[postConstruct]", e);
         }
-        config.register(new ConsoleConfigListener() {
+        config.register(Lists.newArrayList(KEY_SOCKET_STATS_ANALYZERS), new ConfigChangeListener() {
             @Override
             public void onChange(String key, String oldValue, String newValue) {
                 configuredAnalyzers = config.getSocketStatsAnalyzingKeys();
                 addConfiguredAnalyzers();
                 removeUsed();
             }
-
-            @Override
-            public List<String> supportsKeys() {
-                return Lists.newArrayList(KEY_SOCKET_STATS_ANALYZERS);
-            }
         });
         chainAnalyzer.addListener(new ProxyChainAnalyzer.Listener() {
             @Override
-            public void onChange(Map<DcClusterShard, ProxyChain> previous, Map<DcClusterShard, ProxyChain> current) {
+            public void onChange(Map<DcClusterShardPeer, ProxyChain> previous, Map<DcClusterShardPeer, ProxyChain> current) {
                 new SafeLoop<ProxyChain>(executors, current.values()) {
                     @Override
                     protected void doRun0(ProxyChain chain) {

@@ -2,13 +2,12 @@ package com.ctrip.xpipe.redis.meta.server.meta;
 
 import com.ctrip.xpipe.api.lifecycle.Releasable;
 import com.ctrip.xpipe.api.observer.Observable;
-import com.ctrip.xpipe.redis.core.entity.ClusterMeta;
-import com.ctrip.xpipe.redis.core.entity.KeeperMeta;
-import com.ctrip.xpipe.redis.core.entity.RedisMeta;
-import com.ctrip.xpipe.redis.core.entity.RouteMeta;
+import com.ctrip.xpipe.gtid.GtidSet;
+import com.ctrip.xpipe.redis.core.entity.*;
 import com.ctrip.xpipe.tuple.Pair;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -18,11 +17,11 @@ import java.util.Set;
  */
 public interface CurrentMetaManager extends Observable {
 
-	Set<String> allClusters();
+	Set<Long> allClusters();
 
-	boolean hasCluster(String clusterId);
+	boolean hasCluster(Long clusterDbId);
 
-	boolean hasShard(String clusterId, String shardId);
+	boolean hasShard(Long clusterDbId, Long shardDbId);
 
 	void deleteSlot(int slotId);
 
@@ -32,32 +31,72 @@ public interface CurrentMetaManager extends Observable {
 
 	void importSlot(int slotId);
 
-	KeeperMeta getKeeperActive(String clusterId, String shardId);
+	KeeperMeta getKeeperActive(Long clusterDbId, Long shardDbId);
 
-	Pair<String, Integer> getKeeperMaster(String clusterId, String shardId);
+	ApplierMeta getApplierActive(Long clusterDbId, Long shardDbId);
 
-	RouteMeta randomRoute(String clusterId);
+	Pair<String, Integer> getKeeperMaster(Long clusterDbId, Long shardDbId);
 
-	RedisMeta getRedisMaster(String clusterId, String shardId);
+	Pair<String, Integer> getApplierMaster(Long clusterDbId, Long shardDbId);
 
-	ClusterMeta getClusterMeta(String clusterId);
+	RedisMeta getRedisMaster(Long clusterDbId, Long shardDbId);
 
-	List<KeeperMeta> getSurviveKeepers(String clusterId, String shardId);
+	ClusterMeta getClusterMeta(Long clusterDbId);
+
+	List<KeeperMeta> getSurviveKeepers(Long clusterDbId, Long shardDbId);
+
+	List<ApplierMeta> getSurviveAppliers(Long clusterDbId, Long shardDbId);
+
+	List<RedisMeta> getRedises(Long clusterDbId, Long shardDbId);
 
 	String getCurrentMetaDesc();
 
 	/************* update support *****************/
 
-	void addResource(String clusterId, String shardId, Releasable releasable);
+	void setRedises(Long clusterDbId, Long shardDbId, List<RedisMeta> redises);
 
-	void setSurviveKeepers(String clusterId, String shardId, List<KeeperMeta> surviceKeepers, KeeperMeta activeKeeper);
+	void addResource(Long clusterDbId, Long shardDbId, Releasable releasable);
 
-	boolean updateKeeperActive(String clusterId, String shardId, KeeperMeta activeKeeper);
+	void setSurviveKeepers(Long clusterDbId, Long shardDbId, List<KeeperMeta> surviceKeepers, KeeperMeta activeKeeper);
 
-	boolean watchIfNotWatched(String clusterId, String shardId);
+	void setSurviveAppliersAndNotify(Long clusterDbId, Long shardDbId, List<ApplierMeta> surviveAppliers, ApplierMeta activeApplier, String sids);
 
-	void setKeeperMaster(String clusterId, String shardId, String addr);
+	GtidSet getGtidSet(Long clusterDbId, String srcSids);
 
-	void setKeeperMaster(String clusterId, String shardId, String ip, int port);
+	String getSids(Long clusterDbId, Long shardDbId);
+
+	String getSrcSids(Long clusterDbId, Long shardDbId);
+
+	boolean updateKeeperActive(Long clusterDbId, Long shardDbId, KeeperMeta activeKeeper);
+
+	boolean watchKeeperIfNotWatched(Long clusterDbId, Long shardDbId);
+
+	boolean watchApplierIfNotWatched(Long clusterDbId, Long shardDbId);
+
+	void setKeeperMaster(Long clusterDbId, Long shardDbId, String addr);
+
+	void setKeeperMaster(Long clusterDbId, Long shardDbId, String ip, int port);
+
+	void setApplierMasterAndNotify(Long clusterDbId, Long shardDbId, String ip, int port, String sids);
+
+	void setSrcSidsAndNotify(Long clusterDbId, Long shardDbId, String sids);
+
+	void setCurrentCRDTMaster(Long clusterDbId, Long shardDbId, long gid, String ip, int port);
+
+	RedisMeta getCurrentCRDTMaster(Long clusterDbId, Long shardDbId);
+
+	RedisMeta getCurrentMaster(Long clusterDbId, Long shardDbId);
+
+	void setPeerMaster(String dcId, Long clusterDbId, Long shardDbId, long gid, String ip, int port);
+
+	RedisMeta getPeerMaster(String dcId, Long clusterDbId, Long shardDbId);
+
+	Set<String> getUpstreamPeerDcs(Long clusterDbId, Long shardDbId);
+
+	Map<String, RedisMeta> getAllPeerMasters(Long clusterDbId, Long shardDbId);
+
+	RouteMeta getClusterRouteByDcId(String dstDcId, Long clusterDbId);
+
+	void removePeerMaster(String dcId, Long clusterDbId, Long shardDbId);
 
 }
